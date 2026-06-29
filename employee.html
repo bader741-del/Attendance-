@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>بوابة الموظف - منصة مراقبة الدوام</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+<body data-page="employee">
+
+<div class="emp-page">
+  <div class="emp-header">
+    <div class="emp-header-logo">🏥</div>
+    <h1>منصة مراقبة الدوام</h1>
+    <p>مدينة الملك سلمان الطبية</p>
+  </div>
+
+  <!-- ===== شاشة تسجيل دخول الموظف ===== -->
+  <div id="empLoginView" style="width:100%;max-width:420px">
+    <div class="login-box" style="background:rgba(255,255,255,.97)">
+      <div class="login-icon" style="background:linear-gradient(135deg,#1abc9c,#17a589)">
+        <i class="fas fa-user-clock"></i>
+      </div>
+      <h2 class="login-title">دخول الموظف</h2>
+      <p class="login-desc">أدخل الكود الخاص بك للوصول إلى نموذج إدخال البيانات</p>
+      <div class="login-error" id="empLoginError">الكود غير صحيح أو غير موجود، يرجى التحقق</div>
+      <div class="form-group">
+        <label>الكود الخاص <span class="required">*</span></label>
+        <input type="text" id="empCodeInput" class="form-control" placeholder="أدخل الكود الخاص بك"
+               style="direction:ltr;text-align:center;font-size:18px;letter-spacing:2px;font-weight:700"
+               autocomplete="off" autocorrect="off" autocapitalize="characters">
+      </div>
+      <button class="btn btn-success" style="width:100%;justify-content:center;padding:12px;font-size:16px" onclick="EmployeeApp.login()">
+        <i class="fas fa-sign-in-alt"></i> دخول
+      </button>
+      <div style="margin-top:18px;text-align:center">
+        <a href="index.html" style="font-size:13px;color:var(--text-light)"><i class="fas fa-arrow-right"></i> العودة للرئيسية</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== نموذج إدخال بيانات الدوام ===== -->
+  <div id="empFormView" style="display:none;width:100%;max-width:760px">
+    <div class="emp-form-container">
+
+      <!-- رأس النموذج -->
+      <div class="emp-form-header">
+        <div class="emp-form-title">
+          <i class="fas fa-clipboard-list" style="color:var(--primary);margin-left:8px"></i>
+          نموذج إدخال بيانات الدوام
+        </div>
+        <div class="emp-user-badge">
+          <i class="fas fa-user-circle"></i>
+          <span id="empDisplayName">الموظف</span>
+          <button onclick="EmployeeApp.logout()" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:13px;padding:0 0 0 4px" title="تسجيل الخروج">
+            <i class="fas fa-sign-out-alt"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- رسالة النجاح -->
+      <div id="empSuccessMsg" style="display:none;background:var(--success-bg);border:1px solid var(--success-border);border-radius:10px;padding:18px 20px;margin-bottom:20px;text-align:center">
+        <i class="fas fa-check-circle" style="color:var(--success);font-size:28px;display:block;margin-bottom:8px"></i>
+        <strong style="font-size:16px;color:var(--success)">تم حفظ التقرير بنجاح!</strong>
+        <p style="font-size:13px;color:var(--text-light);margin-top:6px">التقرير بانتظار اعتماد النائب الإداري</p>
+        <button class="btn btn-success btn-sm" style="margin-top:14px" onclick="EmployeeApp.newReport()">
+          <i class="fas fa-plus"></i> إدخال تقرير جديد
+        </button>
+      </div>
+
+      <!-- النموذج الرئيسي -->
+      <div id="empMainForm">
+        <!-- التاريخ واليوم والفترة -->
+        <div class="form-row">
+          <div class="form-group">
+            <label>التاريخ <span class="required">*</span></label>
+            <input type="date" class="form-control" id="repDate">
+          </div>
+          <div class="form-group">
+            <label>اليوم</label>
+            <input type="text" class="form-control" id="repDay" readonly style="background:var(--surface-2)">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>الفترة <span class="required">*</span></label>
+            <select class="form-control" id="repPeriod">
+              <option value="">-- اختر الفترة --</option>
+              <option>صباحي</option><option>مسائي</option><option>ليلي</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>المستشفى <span class="required">*</span></label>
+            <select class="form-control" id="repHospital" onchange="EmployeeApp.loadDepts()">
+              <option value="">-- اختر المستشفى --</option>
+              <option>مستشفى الطب النفسي</option>
+              <option>مستشفى النساء والأطفال</option>
+              <option>مستشفى المدينة الرئيسي</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>القسم <span class="required">*</span></label>
+          <select class="form-control" id="repDept">
+            <option value="">-- اختر القسم --</option>
+          </select>
+        </div>
+
+        <!-- أرقام الدوام -->
+        <div style="background:var(--surface-2);border-radius:10px;padding:18px;margin-bottom:18px;border:1.5px solid var(--border)">
+          <div style="font-weight:700;font-size:14px;color:var(--primary);margin-bottom:14px;display:flex;align-items:center;gap:8px">
+            <i class="fas fa-users"></i> بيانات الحضور والغياب
+          </div>
+          <div class="emp-numbers-row">
+            <div class="emp-number-card">
+              <label><i class="fas fa-users" style="color:var(--secondary)"></i> إجمالي الموظفين</label>
+              <input type="number" id="repTotal" min="0" value="0" oninput="EmployeeApp.recalculate()">
+            </div>
+            <div class="emp-number-card">
+              <label><i class="fas fa-user-check" style="color:var(--success)"></i> الحضور</label>
+              <input type="number" id="repPresent" min="0" value="0" oninput="EmployeeApp.recalculate()">
+            </div>
+            <div class="emp-number-card">
+              <label><i class="fas fa-user-times" style="color:var(--danger)"></i> الغياب</label>
+              <input type="number" id="repAbsent" min="0" value="0" oninput="EmployeeApp.recalculate()">
+            </div>
+            <div class="emp-number-card">
+              <label><i class="fas fa-person-walking-arrow-right" style="color:var(--warning)"></i> الانسحاب</label>
+              <input type="number" id="repWithdrawn" min="0" value="0" oninput="EmployeeApp.recalculate()">
+            </div>
+            <div class="emp-number-card">
+              <label><i class="fas fa-umbrella-beach" style="color:var(--pending)"></i> في إجازة</label>
+              <input type="number" id="repLeave" min="0" value="0" oninput="EmployeeApp.recalculate()">
+            </div>
+          </div>
+          <!-- تحقق الأرقام -->
+          <div id="numValidation" style="margin-top:12px;padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;display:none"></div>
+        </div>
+
+        <!-- أسماء المتغيبين والملاحظات -->
+        <div class="form-group">
+          <label>أسماء المتغيبين</label>
+          <textarea class="form-control" id="repAbsentNames" rows="3" placeholder="اكتب أسماء الغائبين، كل اسم في سطر..."></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>الملاحظات</label>
+          <textarea class="form-control" id="repNotes" rows="3" placeholder="أي ملاحظات إضافية..."></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>اسم مدخل البيانات</label>
+          <input type="text" class="form-control" id="repEnteredBy" readonly style="background:var(--surface-2);font-weight:600;color:var(--primary)">
+          <div class="form-hint">يُملأ تلقائياً حسب الكود المستخدم</div>
+        </div>
+
+        <!-- حالة التقرير -->
+        <div style="background:var(--pending-bg);border:1px solid var(--pending-border);border-radius:8px;padding:12px 16px;margin-bottom:20px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--pending)">
+          <i class="fas fa-clock"></i>
+          <span>بعد الحفظ سيكون التقرير <strong>بانتظار اعتماد النائب الإداري</strong></span>
+        </div>
+
+        <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center" onclick="EmployeeApp.submitReport()">
+          <i class="fas fa-paper-plane"></i> حفظ وإرسال التقرير
+        </button>
+      </div>
+    </div>
+
+    <!-- رابط الرجوع -->
+    <div style="text-align:center;margin-top:16px">
+      <a href="index.html" style="color:rgba(255,255,255,.75);font-size:13px">
+        <i class="fas fa-arrow-right"></i> العودة للرئيسية
+      </a>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+<script src="script.js"></script>
+</body>
+</html>
