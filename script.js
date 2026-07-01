@@ -1,24 +1,23 @@
 /* ============================================================
    منصة مراقبة الدوام - مدينة الملك سلمان الطبية
-   script.js - المنطق البرمجي الكامل
+   script.js - المنطق البرمجي الكامل (متصل بـ Supabase)
    ============================================================ */
 
 'use strict';
 
 /* ======================================================
-   طبقة قاعدة البيانات (LocalStorage)
+   اتصال Supabase
+   ====================================================== */
+const _sbClient = (typeof window !== 'undefined' && window.supabase &&
+  typeof SUPABASE_CONFIG !== 'undefined' &&
+  SUPABASE_CONFIG.url && !SUPABASE_CONFIG.url.includes('YOUR-PROJECT'))
+  ? window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey)
+  : null;
+
+/* ======================================================
+   طبقة قاعدة البيانات (Supabase)
    ====================================================== */
 const DB = {
-  _k: {
-    pass:    'mksh_admin_pass',
-    emps:    'mksh_employees',
-    depts:   'mksh_departments',
-    shifts:  'mksh_shifts',
-    reports: 'mksh_reports',
-    session: 'mksh_admin_session',
-    empSess: 'mksh_emp_session',
-  },
-
   HOSPITALS: [
     'مستشفى الطب النفسي',
     'مستشفى النساء والأطفال',
@@ -27,102 +26,234 @@ const DB = {
 
   DAYS: ['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'],
 
-  _get(key, def) {
-    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : def; }
-    catch { return def; }
+  /* قائمة الأقسام القياسية الافتراضية — تُزرع تلقائياً أول مرة فقط.
+     يمكن للمسؤول لاحقاً إضافة/حذف أي قسم يدوياً من لوحة التحكم. */
+  DEFAULT_DEPARTMENTS: {
+    'مستشفى الطب النفسي': [
+      'الطوارئ النفسية',
+      'القسم الداخلي (رجال)',
+      'القسم الداخلي (نساء)',
+      'العيادات النفسية الخارجية',
+      'قسم الإدمان والتأهيل',
+      'قسم نفسية الأطفال والمراهقين',
+      'قسم العلاج السلوكي والمعرفي',
+      'الخدمة الاجتماعية والنفسية',
+      'الصيدلية',
+      'الاستقبال والسجلات الطبية',
+    ],
+    'مستشفى النساء والأطفال': [
+      'الطوارئ',
+      'الولادة والمخاض',
+      'عيادات النساء والولادة',
+      'عيادات الأطفال',
+      'حضانة العناية المركزة لحديثي الولادة',
+      'العناية المركزة للأطفال',
+      'جراحة النساء',
+      'جراحة الأطفال',
+      'الأشعة',
+      'المختبر',
+      'الصيدلية',
+      'الاستقبال والسجلات الطبية',
+    ],
+    'مستشفى المدينة الرئيسي': [
+      'الطوارئ',
+      'الباطنية',
+      'الجراحة العامة',
+      'العناية المركزة',
+      'العظام',
+      'القلب',
+      'الأنف والأذن والحنجرة',
+      'المسالك البولية',
+      'الغسيل الكلوي',
+      'الأشعة',
+      'المختبر',
+      'الصيدلية',
+      'العيادات الخارجية',
+      'الاستقبال والسجلات الطبية',
+    ],
   },
-  _set(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch(e) { console.error(e); } },
+
+  _ensure() {
+    if (!_sbClient) {
+      Toast?.show?.('لم يتم إعداد الاتصال بقاعدة البيانات — راجع ملف config.js', 'error', 6000);
+      console.error('Supabase غير مُهيأ. تأكد من تحميل مكتبة supabase-js وتعبئة config.js بالبيانات الصحيحة.');
+      return false;
+    }
+    return true;
+  },
+
+  /* ---- جلسات (تبقى محلية في المتصفح) ---- */
+  setAdminSession()   { sessionStorage.setItem('mksh_admin_session', '1'); },
+  clearAdminSession() { sessionStorage.removeItem('mksh_admin_session'); },
+  isAdminLoggedIn()   { return sessionStorage.getItem('mksh_admin_session') === '1'; },
+
+  setEmpSession(emp)   { sessionStorage.setItem('mksh_emp_session', JSON.stringify(emp)); },
+  clearEmpSession()    { sessionStorage.removeItem('mksh_emp_session'); },
+  getEmpSession()      { try { const v = sessionStorage.getItem('mksh_emp_session'); return v ? JSON.parse(v) : null; } catch { return null; } },
 
   /* ---- كلمة مرور المسؤول ---- */
-  getPass()       { return this._get(this._k.pass, 'admin1234'); },
-  setPass(p)      { this._set(this._k.pass, p); },
-
-  /* ---- جلسات ---- */
-  setAdminSession()   { sessionStorage.setItem(this._k.session, '1'); },
-  clearAdminSession() { sessionStorage.removeItem(this._k.session); },
-  isAdminLoggedIn()   { return sessionStorage.getItem(this._k.session) === '1'; },
-
-  setEmpSession(emp)   { sessionStorage.setItem(this._k.empSess, JSON.stringify(emp)); },
-  clearEmpSession()    { sessionStorage.removeItem(this._k.empSess); },
-  getEmpSession()      { try { const v = sessionStorage.getItem(this._k.empSess); return v ? JSON.parse(v) : null; } catch { return null; } },
+  async getPass() {
+    if (!this._ensure()) return 'admin1234';
+    const { data, error } = await _sbClient.from('settings').select('admin_password').eq('id', 1).single();
+    if (error) { console.error(error); return 'admin1234'; }
+    return data?.admin_password || 'admin1234';
+  },
+  async setPass(p) {
+    if (!this._ensure()) return;
+    const { error } = await _sbClient.from('settings').update({ admin_password: p }).eq('id', 1);
+    if (error) console.error(error);
+  },
 
   /* ---- موظفون ---- */
-  getEmployees()   { return this._get(this._k.emps, []); },
-  _saveEmps(arr)   { this._set(this._k.emps, arr); },
-  addEmployee(data) {
-    const emps = this.getEmployees();
-    if (emps.some(e => e.code === data.code)) return { ok: false, msg: 'الكود مستخدم بالفعل' };
-    emps.push({ ...data, id: this._uid(), createdAt: this._now() });
-    this._saveEmps(emps);
+  async getEmployees() {
+    if (!this._ensure()) return [];
+    const { data, error } = await _sbClient.from('employees').select('*').order('created_at', { ascending: false });
+    if (error) { console.error(error); return []; }
+    return data.map(this._mapEmpOut);
+  },
+  async addEmployee(data) {
+    if (!this._ensure()) return { ok: false, msg: 'قاعدة البيانات غير متصلة' };
+    const dup = await _sbClient.from('employees').select('id').eq('code', data.code).maybeSingle();
+    if (dup.data) return { ok: false, msg: 'الكود مستخدم بالفعل' };
+    const { error } = await _sbClient.from('employees').insert({ name: data.name, code: data.code, hospital: data.hospital || null });
+    if (error) return { ok: false, msg: 'حدث خطأ أثناء الحفظ' };
     return { ok: true };
   },
-  updateEmployee(id, data) {
-    const emps = this.getEmployees();
-    if (emps.some(e => e.code === data.code && e.id !== id)) return { ok: false, msg: 'الكود مستخدم بالفعل' };
-    const idx = emps.findIndex(e => e.id === id);
-    if (idx < 0) return { ok: false, msg: 'الموظف غير موجود' };
-    emps[idx] = { ...emps[idx], ...data };
-    this._saveEmps(emps);
+  async updateEmployee(id, data) {
+    if (!this._ensure()) return { ok: false, msg: 'قاعدة البيانات غير متصلة' };
+    const dup = await _sbClient.from('employees').select('id').eq('code', data.code).neq('id', id).maybeSingle();
+    if (dup.data) return { ok: false, msg: 'الكود مستخدم بالفعل' };
+    const { error } = await _sbClient.from('employees').update({ name: data.name, code: data.code, hospital: data.hospital || null }).eq('id', id);
+    if (error) return { ok: false, msg: 'الموظف غير موجود' };
     return { ok: true };
   },
-  deleteEmployee(id)   { this._saveEmps(this.getEmployees().filter(e => e.id !== id)); },
-  findByCode(code)     { return this.getEmployees().find(e => e.code === code.trim().toUpperCase()); },
+  async deleteEmployee(id) {
+    if (!this._ensure()) return;
+    const { error } = await _sbClient.from('employees').delete().eq('id', id);
+    if (error) console.error(error);
+  },
+  async findByCode(code) {
+    if (!this._ensure()) return null;
+    const { data, error } = await _sbClient.from('employees').select('*').eq('code', code.trim().toUpperCase()).maybeSingle();
+    if (error) { console.error(error); return null; }
+    return data ? this._mapEmpOut(data) : null;
+  },
+  _mapEmpOut(e) { return { id: e.id, name: e.name, code: e.code, hospital: e.hospital, createdAt: e.created_at }; },
 
   /* ---- أقسام ---- */
-  getDepartments()          { return this._get(this._k.depts, []); },
-  _saveDepts(arr)           { this._set(this._k.depts, arr); },
-  addDepartment(data)       { const d = this.getDepartments(); d.push({ ...data, id: this._uid(), createdAt: this._now() }); this._saveDepts(d); },
-  deleteDepartment(id)      { this._saveDepts(this.getDepartments().filter(d => d.id !== id)); },
-  getDeptsByHospital(hosp)  { return this.getDepartments().filter(d => d.hospital === hosp); },
+  async getDepartments() {
+    if (!this._ensure()) return [];
+    const { data, error } = await _sbClient.from('departments').select('*').order('hospital').order('name');
+    if (error) { console.error(error); return []; }
+    return data.map(this._mapDeptOut);
+  },
+  async addDepartment(data) {
+    if (!this._ensure()) return;
+    const { error } = await _sbClient.from('departments').insert({ name: data.name, hospital: data.hospital });
+    if (error) console.error(error);
+  },
+  async deleteDepartment(id) {
+    if (!this._ensure()) return;
+    const { error } = await _sbClient.from('departments').delete().eq('id', id);
+    if (error) console.error(error);
+  },
+  async getDeptsByHospital(hosp) {
+    if (!this._ensure()) return [];
+    const { data, error } = await _sbClient.from('departments').select('*').eq('hospital', hosp).order('name');
+    if (error) { console.error(error); return []; }
+    return data.map(this._mapDeptOut);
+  },
+  _mapDeptOut(d) { return { id: d.id, name: d.name, hospital: d.hospital, createdAt: d.created_at }; },
+
+  /* زرع الأقسام الافتراضية أول مرة فقط (إن لم توجد أي أقسام محفوظة) */
+  async seedDefaultDepartmentsIfEmpty() {
+    if (!this._ensure()) return;
+    const { count, error } = await _sbClient.from('departments').select('id', { count: 'exact', head: true });
+    if (error) { console.error(error); return; }
+    if (count && count > 0) return;
+    const rows = [];
+    Object.entries(this.DEFAULT_DEPARTMENTS).forEach(([hospital, names]) => {
+      names.forEach(name => rows.push({ name, hospital }));
+    });
+    if (!rows.length) return;
+    const { error: insErr } = await _sbClient.from('departments').insert(rows);
+    if (insErr) console.error(insErr);
+  },
 
   /* ---- جداول دوام ---- */
-  getShifts()        { return this._get(this._k.shifts, []); },
-  _saveShifts(arr)   { this._set(this._k.shifts, arr); },
-  addShift(data)     { const s = this.getShifts(); s.push({ ...data, id: this._uid(), createdAt: this._now() }); this._saveShifts(s); },
-  updateShift(id, data) {
-    const s = this.getShifts();
-    const i = s.findIndex(x => x.id === id);
-    if (i < 0) return false;
-    s[i] = { ...s[i], ...data };
-    this._saveShifts(s);
-    return true;
+  async getShifts() {
+    if (!this._ensure()) return [];
+    const { data, error } = await _sbClient.from('shifts').select('*').order('created_at', { ascending: false });
+    if (error) { console.error(error); return []; }
+    return data.map(this._mapShiftOut);
   },
-  deleteShift(id)    { this._saveShifts(this.getShifts().filter(s => s.id !== id)); },
+  async addShift(data) {
+    if (!this._ensure()) return;
+    const { error } = await _sbClient.from('shifts').insert({ hospital: data.hospital, department: data.department, period: data.period, required_count: data.requiredCount });
+    if (error) console.error(error);
+  },
+  async updateShift(id, data) {
+    if (!this._ensure()) return false;
+    const { error } = await _sbClient.from('shifts').update({ hospital: data.hospital, department: data.department, period: data.period, required_count: data.requiredCount }).eq('id', id);
+    return !error;
+  },
+  async deleteShift(id) {
+    if (!this._ensure()) return;
+    const { error } = await _sbClient.from('shifts').delete().eq('id', id);
+    if (error) console.error(error);
+  },
+  _mapShiftOut(s) { return { id: s.id, hospital: s.hospital, department: s.department, period: s.period, requiredCount: s.required_count, createdAt: s.created_at }; },
 
   /* ---- تقارير ---- */
-  getReports()       { return this._get(this._k.reports, []); },
-  _saveReports(arr)  { this._set(this._k.reports, arr); },
-  addReport(data) {
-    const r = this.getReports();
-    const report = { ...data, id: this._uid(), status: 'pending', createdAt: this._now() };
-    r.push(report);
-    this._saveReports(r);
-    return report;
+  async getReports() {
+    if (!this._ensure()) return [];
+    const { data, error } = await _sbClient.from('reports').select('*').order('created_at', { ascending: false });
+    if (error) { console.error(error); return []; }
+    return data.map(this._mapReportOut);
   },
-  approveReport(id) {
-    const r = this.getReports();
-    const i = r.findIndex(x => x.id === id);
-    if (i < 0) return false;
-    r[i].status = 'approved';
-    r[i].approvedAt = this._now();
-    this._saveReports(r);
-    return true;
+  async addReport(data) {
+    if (!this._ensure()) return null;
+    const row = {
+      date: data.date, day: data.day, period: data.period, hospital: data.hospital, department: data.department,
+      total: data.total, present: data.present, absent: data.absent, withdrawn: data.withdrawn,
+      leave_count: data.leave, absent_names: data.absentNames || null, notes: data.notes || null,
+      entered_by: data.enteredBy || null, employee_code: data.employeeCode || null, status: 'pending',
+    };
+    const { data: inserted, error } = await _sbClient.from('reports').insert(row).select().single();
+    if (error) { console.error(error); return null; }
+    return this._mapReportOut(inserted);
   },
-  rejectReport(id, reason) {
-    const r = this.getReports();
-    const i = r.findIndex(x => x.id === id);
-    if (i < 0) return false;
-    r[i].status = 'rejected';
-    r[i].rejectionReason = reason;
-    r[i].rejectedAt = this._now();
-    this._saveReports(r);
-    return true;
+  async approveReport(id) {
+    if (!this._ensure()) return false;
+    const { error } = await _sbClient.from('reports').update({ status: 'approved', approved_at: this._now() }).eq('id', id);
+    return !error;
   },
-  deleteReport(id)   { this._saveReports(this.getReports().filter(r => r.id !== id)); },
-  clearReports()     { this._set(this._k.reports, []); },
+  async rejectReport(id, reason) {
+    if (!this._ensure()) return false;
+    const { error } = await _sbClient.from('reports').update({ status: 'rejected', rejection_reason: reason, rejected_at: this._now() }).eq('id', id);
+    return !error;
+  },
+  async deleteReport(id) {
+    if (!this._ensure()) return;
+    const { error } = await _sbClient.from('reports').delete().eq('id', id);
+    if (error) console.error(error);
+  },
+  async clearReports() {
+    if (!this._ensure()) return;
+    const { error } = await _sbClient.from('reports').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    if (error) console.error(error);
+  },
+  _mapReportOut(r) {
+    return {
+      id: r.id, date: r.date, day: r.day, period: r.period, hospital: r.hospital, department: r.department,
+      total: r.total, present: r.present, absent: r.absent, withdrawn: r.withdrawn, leave: r.leave_count,
+      absentNames: r.absent_names, notes: r.notes, enteredBy: r.entered_by, employeeCode: r.employee_code,
+      status: r.status, rejectionReason: r.rejection_reason, createdAt: r.created_at,
+      approvedAt: r.approved_at, rejectedAt: r.rejected_at,
+    };
+  },
 
   /* ---- مساعدات ---- */
-  _uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); },
   _now() { return new Date().toISOString(); },
 
   getDayName(dateStr) {
@@ -172,25 +303,26 @@ const Toast = {
 const AdminApp = {
   currentSection: 'dashboard',
 
-  init() {
+  async init() {
     if (!DB.isAdminLoggedIn()) {
       document.getElementById('adminLogin').style.display = 'flex';
       document.getElementById('adminContent').style.display = 'none';
       const inp = document.getElementById('adminPassInput');
       if (inp) inp.addEventListener('keydown', e => { if (e.key === 'Enter') this.login(); });
     } else {
-      this._showApp();
+      await this._showApp();
     }
   },
 
-  login() {
+  async login() {
     const inp = document.getElementById('adminPassInput');
     const err = document.getElementById('loginError');
     if (!inp || !err) return;
-    if (inp.value === DB.getPass()) {
+    const pass = await DB.getPass();
+    if (inp.value === pass) {
       DB.setAdminSession();
       err.classList.remove('show');
-      this._showApp();
+      await this._showApp();
     } else {
       err.classList.add('show');
       inp.value = '';
@@ -203,7 +335,7 @@ const AdminApp = {
     location.reload();
   },
 
-  _showApp() {
+  async _showApp() {
     document.getElementById('adminLogin').style.display = 'none';
     document.getElementById('adminContent').style.display = 'flex';
     document.getElementById('currentDateDisplay').textContent = new Date().toLocaleDateString('ar-SA', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
@@ -218,11 +350,12 @@ const AdminApp = {
     if (wf) wf.value = wr.from;
     if (wt) wt.value = wr.to;
 
-    this.showSection('dashboard');
-    this._updatePendingBadge();
+    await DB.seedDefaultDepartmentsIfEmpty();
+    await this.showSection('dashboard');
+    await this._updatePendingBadge();
   },
 
-  showSection(name) {
+  async showSection(name) {
     document.querySelectorAll('.section-content').forEach(s => s.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     const sec = document.getElementById(`sec-${name}`);
@@ -250,7 +383,7 @@ const AdminApp = {
       weekly:      () => this.renderWeeklyReport(),
       monthly:     () => this.renderMonthlyReport(),
     };
-    if (loaders[name]) loaders[name]();
+    if (loaders[name]) await loaders[name]();
 
     // إغلاق sidebar على الجوال
     if (window.innerWidth <= 768) this.closeSidebar();
@@ -267,8 +400,9 @@ const AdminApp = {
     document.getElementById('sidebarOverlay').classList.remove('show');
   },
 
-  _updatePendingBadge() {
-    const pending = DB.getReports().filter(r => r.status === 'pending').length;
+  async _updatePendingBadge() {
+    const reports = await DB.getReports();
+    const pending = reports.filter(r => r.status === 'pending').length;
     const badge = document.getElementById('pendingBadge');
     if (!badge) return;
     if (pending > 0) { badge.style.display = 'inline'; badge.textContent = pending; }
@@ -276,13 +410,13 @@ const AdminApp = {
   },
 
   /* ====== لوحة التحكم ====== */
-  loadDashboard() {
+  async loadDashboard() {
     const hospital = document.getElementById('dashHospital')?.value || '';
     const period   = document.getElementById('dashPeriod')?.value   || '';
     const dateFrom = document.getElementById('dashDateFrom')?.value || '';
     const dateTo   = document.getElementById('dashDateTo')?.value   || '';
 
-    let reports = DB.getReports();
+    let reports = await DB.getReports();
     if (hospital) reports = reports.filter(r => r.hospital === hospital);
     if (period)   reports = reports.filter(r => r.period   === period);
     if (dateFrom) reports = reports.filter(r => r.date >= dateFrom);
@@ -379,9 +513,9 @@ const AdminApp = {
   },
 
   /* ====== موظفون ====== */
-  renderEmployees() {
+  async renderEmployees() {
     const search = (document.getElementById('empSearchInput')?.value || '').toLowerCase();
-    let emps = DB.getEmployees();
+    let emps = await DB.getEmployees();
     if (search) emps = emps.filter(e => e.name.toLowerCase().includes(search) || e.code.toLowerCase().includes(search));
     const tbody = document.getElementById('employeesBody');
     if (!tbody) return;
@@ -412,12 +546,13 @@ const AdminApp = {
     this.openModal('empModal');
   },
 
-  editEmployee(id) {
-    const emp = DB.getEmployees().find(e => e.id === id);
+  async editEmployee(id) {
+    const emps = await DB.getEmployees();
+    const emp = emps.find(e => e.id === id);
     if (emp) this.openEmpModal(emp);
   },
 
-  saveEmployee() {
+  async saveEmployee() {
     const id   = document.getElementById('empEditId').value;
     const name = document.getElementById('empName').value.trim();
     const code = document.getElementById('empCode').value.trim().toUpperCase();
@@ -428,20 +563,20 @@ const AdminApp = {
     if (!/^[A-Z0-9\-_]+$/i.test(code)) return Toast.show('الكود يجب أن يحتوي على حروف وأرقام فقط', 'error');
 
     const result = id
-      ? DB.updateEmployee(id, { name, code, hospital })
-      : DB.addEmployee({ name, code, hospital });
+      ? await DB.updateEmployee(id, { name, code, hospital })
+      : await DB.addEmployee({ name, code, hospital });
 
     if (!result.ok) return Toast.show(result.msg, 'error');
     Toast.show(id ? 'تم تحديث بيانات الموظف' : 'تمت إضافة الموظف بنجاح', 'success');
     this.closeModal('empModal');
-    this.renderEmployees();
+    await this.renderEmployees();
   },
 
   deleteEmployee(id, name) {
-    this._confirm(`هل تريد حذف الموظف "${name}"؟`, () => {
-      DB.deleteEmployee(id);
+    this._confirm(`هل تريد حذف الموظف "${name}"؟`, async () => {
+      await DB.deleteEmployee(id);
       Toast.show('تم حذف الموظف', 'success');
-      this.renderEmployees();
+      await this.renderEmployees();
     });
   },
 
@@ -453,8 +588,8 @@ const AdminApp = {
   },
 
   /* ====== جداول الدوام ====== */
-  renderShifts() {
-    const shifts = DB.getShifts();
+  async renderShifts() {
+    const shifts = await DB.getShifts();
     const tbody = document.getElementById('shiftsBody');
     if (!tbody) return;
     if (!shifts.length) {
@@ -476,22 +611,23 @@ const AdminApp = {
       </tr>`).join('');
   },
 
-  openShiftModal(shift) {
+  async openShiftModal(shift) {
     document.getElementById('shiftEditId').value = shift?.id || '';
     document.getElementById('shiftHospital').value  = shift?.hospital || '';
     document.getElementById('shiftPeriod').value    = shift?.period   || '';
     document.getElementById('shiftCount').value     = shift?.requiredCount || '';
-    this.loadDeptOptions('shiftDept','shiftHospital', shift?.department);
+    await this.loadDeptOptions('shiftDept','shiftHospital', shift?.department);
     document.getElementById('shiftModalTitle').textContent = shift ? 'تعديل جدول الدوام' : 'إضافة جدول دوام';
     this.openModal('shiftModal');
   },
 
-  editShift(id) {
-    const s = DB.getShifts().find(x => x.id === id);
-    if (s) this.openShiftModal(s);
+  async editShift(id) {
+    const shifts = await DB.getShifts();
+    const s = shifts.find(x => x.id === id);
+    if (s) await this.openShiftModal(s);
   },
 
-  saveShift() {
+  async saveShift() {
     const id       = document.getElementById('shiftEditId').value;
     const hospital = document.getElementById('shiftHospital').value;
     const dept     = document.getElementById('shiftDept').value;
@@ -504,25 +640,25 @@ const AdminApp = {
     if (!count || count < 1) return Toast.show('يرجى إدخال عدد الموظفين', 'error');
 
     const data = { hospital, department: dept, period, requiredCount: count };
-    if (id) DB.updateShift(id, data);
-    else    DB.addShift(data);
+    if (id) await DB.updateShift(id, data);
+    else    await DB.addShift(data);
 
     Toast.show(id ? 'تم تحديث جدول الدوام' : 'تمت إضافة جدول الدوام', 'success');
     this.closeModal('shiftModal');
-    this.renderShifts();
+    await this.renderShifts();
   },
 
   deleteShift(id) {
-    this._confirm('هل تريد حذف هذا الجدول؟', () => {
-      DB.deleteShift(id);
+    this._confirm('هل تريد حذف هذا الجدول؟', async () => {
+      await DB.deleteShift(id);
       Toast.show('تم حذف الجدول', 'success');
-      this.renderShifts();
+      await this.renderShifts();
     });
   },
 
   /* ====== أقسام ====== */
-  renderDepts() {
-    const depts = DB.getDepartments();
+  async renderDepts() {
+    const depts = await DB.getDepartments();
     const tbody = document.getElementById('deptsBody');
     if (!tbody) return;
     if (!depts.length) {
@@ -541,33 +677,34 @@ const AdminApp = {
 
   openDeptModal() { this.openModal('deptModal'); document.getElementById('deptName').value = ''; document.getElementById('deptHospital').value = ''; },
 
-  saveDept() {
+  async saveDept() {
     const name = document.getElementById('deptName').value.trim();
     const hospital = document.getElementById('deptHospital').value;
     if (!name) return Toast.show('يرجى إدخال اسم القسم', 'error');
     if (!hospital) return Toast.show('يرجى اختيار المستشفى', 'error');
-    DB.addDepartment({ name, hospital });
+    await DB.addDepartment({ name, hospital });
     Toast.show('تمت إضافة القسم بنجاح', 'success');
     this.closeModal('deptModal');
-    this.renderDepts();
+    await this.renderDepts();
   },
 
   deleteDept(id, name) {
-    this._confirm(`هل تريد حذف قسم "${name}"؟`, () => {
-      DB.deleteDepartment(id);
+    this._confirm(`هل تريد حذف قسم "${name}"؟`, async () => {
+      await DB.deleteDepartment(id);
       Toast.show('تم حذف القسم', 'success');
-      this.renderDepts();
+      await this.renderDepts();
     });
   },
 
   /* ====== تحميل خيارات الأقسام ====== */
-  loadDeptOptions(targetId, hospitalSelectId, selected) {
+  async loadDeptOptions(targetId, hospitalSelectId, selected) {
     const hospital = document.getElementById(hospitalSelectId)?.value;
     const select = document.getElementById(targetId);
     if (!select) return;
     select.innerHTML = '<option value="">-- اختر القسم --</option>';
     if (hospital) {
-      DB.getDeptsByHospital(hospital).forEach(d => {
+      const depts = await DB.getDeptsByHospital(hospital);
+      depts.forEach(d => {
         const opt = document.createElement('option');
         opt.value = d.name; opt.textContent = d.name;
         if (selected && d.name === selected) opt.selected = true;
@@ -577,14 +714,14 @@ const AdminApp = {
   },
 
   /* ====== سجل التقارير ====== */
-  renderReports() {
+  async renderReports() {
     const filterDate    = document.getElementById('repFilterDate')?.value    || '';
     const filterHosp    = document.getElementById('repFilterHospital')?.value || '';
     const filterPeriod  = document.getElementById('repFilterPeriod')?.value  || '';
     const filterStatus  = document.getElementById('repFilterStatus')?.value  || '';
     const filterSearch  = (document.getElementById('repFilterSearch')?.value || '').toLowerCase();
 
-    let reports = DB.getReports();
+    let reports = await DB.getReports();
     if (filterDate)   reports = reports.filter(r => r.date === filterDate);
     if (filterHosp)   reports = reports.filter(r => r.hospital === filterHosp);
     if (filterPeriod) reports = reports.filter(r => r.period   === filterPeriod);
@@ -631,7 +768,7 @@ const AdminApp = {
         </td>
       </tr>`).join('');
 
-    this._updatePendingBadge();
+    await this._updatePendingBadge();
   },
 
   resetRepFilter() {
@@ -641,11 +778,11 @@ const AdminApp = {
     this.renderReports();
   },
 
-  approveReport(id) {
-    if (DB.approveReport(id)) {
+  async approveReport(id) {
+    if (await DB.approveReport(id)) {
       Toast.show('تم اعتماد التقرير بنجاح', 'success');
-      this.renderReports();
-      this._updatePendingBadge();
+      await this.renderReports();
+      await this._updatePendingBadge();
     }
   },
 
@@ -655,19 +792,20 @@ const AdminApp = {
     this.openModal('rejectModal');
   },
 
-  confirmReject() {
+  async confirmReject() {
     const id = document.getElementById('rejectReportId').value;
     const reason = document.getElementById('rejectReason').value.trim();
     if (!reason) return Toast.show('يرجى كتابة سبب الرفض', 'error');
-    DB.rejectReport(id, reason);
+    await DB.rejectReport(id, reason);
     Toast.show('تم رفض التقرير', 'warning');
     this.closeModal('rejectModal');
-    this.renderReports();
-    this._updatePendingBadge();
+    await this.renderReports();
+    await this._updatePendingBadge();
   },
 
-  viewReport(id) {
-    const r = DB.getReports().find(x => x.id === id);
+  async viewReport(id) {
+    const reports = await DB.getReports();
+    const r = reports.find(x => x.id === id);
     if (!r) return;
     const body = document.getElementById('reportDetailBody');
     body.innerHTML = `
@@ -709,19 +847,19 @@ const AdminApp = {
   },
 
   deleteReport(id) {
-    this._confirm('هل تريد حذف هذا التقرير نهائياً؟', () => {
-      DB.deleteReport(id);
+    this._confirm('هل تريد حذف هذا التقرير نهائياً؟', async () => {
+      await DB.deleteReport(id);
       Toast.show('تم حذف التقرير', 'success');
-      this.renderReports();
-      this._updatePendingBadge();
+      await this.renderReports();
+      await this._updatePendingBadge();
     });
   },
 
   clearReports() {
-    this._confirm('سيتم حذف جميع التقارير نهائياً. هل أنت متأكد؟', () => {
-      DB.clearReports();
+    this._confirm('سيتم حذف جميع التقارير نهائياً. هل أنت متأكد؟', async () => {
+      await DB.clearReports();
       Toast.show('تم حذف جميع التقارير', 'success');
-      this._updatePendingBadge();
+      await this._updatePendingBadge();
     });
   },
 
@@ -771,34 +909,34 @@ const AdminApp = {
       </div>`;
   },
 
-  renderDailyReport() {
+  async renderDailyReport() {
     const date = document.getElementById('dailyDate')?.value;
     const body = document.getElementById('dailyReportBody');
     if (!body) return;
-    const reports = DB.getReports().filter(r => r.date === date);
+    const reports = (await DB.getReports()).filter(r => r.date === date);
     body.innerHTML = this._buildReportTable(reports);
   },
 
-  renderWeeklyReport() {
+  async renderWeeklyReport() {
     const from = document.getElementById('weeklyFrom')?.value;
     const to   = document.getElementById('weeklyTo')?.value;
     const body = document.getElementById('weeklyReportBody');
     if (!body) return;
-    const reports = DB.getReports().filter(r => (!from || r.date >= from) && (!to || r.date <= to));
+    const reports = (await DB.getReports()).filter(r => (!from || r.date >= from) && (!to || r.date <= to));
     body.innerHTML = this._buildReportTable(reports);
   },
 
-  renderMonthlyReport() {
+  async renderMonthlyReport() {
     const month = document.getElementById('monthlyMonth')?.value;
     const body = document.getElementById('monthlyReportBody');
     if (!body) return;
-    const reports = DB.getReports().filter(r => month && r.date.startsWith(month));
+    const reports = (await DB.getReports()).filter(r => month && r.date.startsWith(month));
     body.innerHTML = this._buildReportTable(reports);
   },
 
   /* ====== تصدير Excel ====== */
-  exportReports(type) {
-    let reports = DB.getReports();
+  async exportReports(type) {
+    let reports = await DB.getReports();
     let filename = 'تقرير_الدوام';
 
     if (type === 'daily') {
@@ -869,14 +1007,15 @@ const AdminApp = {
   },
 
   /* ====== الإعدادات ====== */
-  changePassword() {
+  async changePassword() {
     const oldP = document.getElementById('settingsOldPass').value;
     const newP = document.getElementById('settingsNewPass').value;
     const conP = document.getElementById('settingsConfPass').value;
-    if (oldP !== DB.getPass()) return Toast.show('كلمة المرور الحالية غير صحيحة', 'error');
+    const currentPass = await DB.getPass();
+    if (oldP !== currentPass) return Toast.show('كلمة المرور الحالية غير صحيحة', 'error');
     if (newP.length < 6) return Toast.show('كلمة المرور الجديدة يجب أن تكون 6 أحرف على الأقل', 'error');
     if (newP !== conP) return Toast.show('كلمتا المرور غير متطابقتين', 'error');
-    DB.setPass(newP);
+    await DB.setPass(newP);
     Toast.show('تم تغيير كلمة المرور بنجاح', 'success');
     ['settingsOldPass','settingsNewPass','settingsConfPass'].forEach(id => { document.getElementById(id).value = ''; });
   },
@@ -942,10 +1081,10 @@ const EmployeeApp = {
     }
   },
 
-  login() {
+  async login() {
     const code = document.getElementById('empCodeInput').value.trim().toUpperCase();
     const err  = document.getElementById('empLoginError');
-    const emp  = DB.findByCode(code);
+    const emp  = await DB.findByCode(code);
     if (emp) {
       err.classList.remove('show');
       this.currentEmployee = emp;
@@ -979,12 +1118,13 @@ const EmployeeApp = {
     }
   },
 
-  loadDepts() {
+  async loadDepts() {
     const hospital = document.getElementById('repHospital').value;
     const select = document.getElementById('repDept');
     select.innerHTML = '<option value="">-- اختر القسم --</option>';
     if (hospital) {
-      DB.getDeptsByHospital(hospital).forEach(d => {
+      const depts = await DB.getDeptsByHospital(hospital);
+      depts.forEach(d => {
         const opt = document.createElement('option');
         opt.value = d.name; opt.textContent = d.name;
         select.appendChild(opt);
@@ -1017,7 +1157,7 @@ const EmployeeApp = {
     }
   },
 
-  submitReport() {
+  async submitReport() {
     const date      = document.getElementById('repDate').value;
     const day       = document.getElementById('repDay').value;
     const period    = document.getElementById('repPeriod').value;
@@ -1042,7 +1182,8 @@ const EmployeeApp = {
     const sum = present + absent + withdrawn + leave;
     if (sum > total && total > 0) return Toast.show(`مجموع الأرقام (${sum}) أكبر من إجمالي الموظفين (${total})`, 'error');
 
-    DB.addReport({ date, day, period, hospital, department: dept, total, present, absent, withdrawn, leave, absentNames, notes, enteredBy, employeeCode: this.currentEmployee.code });
+    const saved = await DB.addReport({ date, day, period, hospital, department: dept, total, present, absent, withdrawn, leave, absentNames, notes, enteredBy, employeeCode: this.currentEmployee.code });
+    if (!saved) return Toast.show('تعذّر حفظ التقرير — تحقق من الاتصال', 'error');
 
     // إخفاء النموذج وعرض رسالة النجاح
     document.getElementById('empMainForm').style.display = 'none';
