@@ -226,7 +226,7 @@
           <div class="table-overflow">
             <table class="data-table">
               <thead><tr>
-                <th>#</th><th>اسم الموظف</th><th>الكود الخاص</th><th>المستشفى</th><th>تاريخ الإضافة</th><th>الإجراءات</th>
+                <th>#</th><th>اسم الموظف</th><th>الكود الخاص</th><th>المستشفى</th><th>القسم</th><th>تاريخ الإضافة</th><th>الإجراءات</th>
               </tr></thead>
               <tbody id="employeesBody"></tbody>
             </table>
@@ -454,11 +454,17 @@
       </div>
       <div class="form-group">
         <label>المستشفى</label>
-        <select class="form-control" id="empHospital">
+        <select class="form-control" id="empHospital" onchange="AdminApp.loadDeptOptions('empDept','empHospital')">
           <option value="">-- اختر المستشفى --</option>
           <option>مستشفى الطب النفسي</option>
           <option>مستشفى النساء والأطفال</option>
           <option>مستشفى المدينة الرئيسي</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>القسم</label>
+        <select class="form-control" id="empDept">
+          <option value="">-- اختر القسم --</option>
         </select>
       </div>
     </div>

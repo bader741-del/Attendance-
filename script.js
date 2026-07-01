@@ -30,46 +30,29 @@ const DB = {
      يمكن للمسؤول لاحقاً إضافة/حذف أي قسم يدوياً من لوحة التحكم. */
   DEFAULT_DEPARTMENTS: {
     'مستشفى الطب النفسي': [
-      'الطوارئ النفسية',
-      'القسم الداخلي (رجال)',
-      'القسم الداخلي (نساء)',
-      'العيادات النفسية الخارجية',
-      'قسم الإدمان والتأهيل',
-      'قسم نفسية الأطفال والمراهقين',
-      'قسم العلاج السلوكي والمعرفي',
-      'الخدمة الاجتماعية والنفسية',
-      'الصيدلية',
-      'الاستقبال والسجلات الطبية',
-    ],
-    'مستشفى النساء والأطفال': [
       'الطوارئ',
-      'الولادة والمخاض',
-      'عيادات النساء والولادة',
-      'عيادات الأطفال',
-      'حضانة العناية المركزة لحديثي الولادة',
-      'العناية المركزة للأطفال',
-      'جراحة النساء',
-      'جراحة الأطفال',
-      'الأشعة',
+      'العناية المركزة',
+      'التنويم',
+      'العيادات الخارجية',
       'المختبر',
       'الصيدلية',
-      'الاستقبال والسجلات الطبية',
+    ],
+    'مستشفى النساء والأطفال': [
+      'الولادة',
+      'الحضانات',
+      'الأطفال',
+      'النساء',
+      'الطوارئ',
+      'العمليات',
     ],
     'مستشفى المدينة الرئيسي': [
       'الطوارئ',
-      'الباطنية',
-      'الجراحة العامة',
+      'التنويم',
       'العناية المركزة',
-      'العظام',
-      'القلب',
-      'الأنف والأذن والحنجرة',
-      'المسالك البولية',
-      'الغسيل الكلوي',
-      'الأشعة',
+      'الجراحة',
+      'الباطنية',
       'المختبر',
-      'الصيدلية',
-      'العيادات الخارجية',
-      'الاستقبال والسجلات الطبية',
+      'الأشعة',
     ],
   },
 
@@ -115,7 +98,7 @@ const DB = {
     if (!this._ensure()) return { ok: false, msg: 'قاعدة البيانات غير متصلة' };
     const dup = await _sbClient.from('employees').select('id').eq('code', data.code).maybeSingle();
     if (dup.data) return { ok: false, msg: 'الكود مستخدم بالفعل' };
-    const { error } = await _sbClient.from('employees').insert({ name: data.name, code: data.code, hospital: data.hospital || null });
+    const { error } = await _sbClient.from('employees').insert({ name: data.name, code: data.code, hospital: data.hospital || null, department: data.department || null });
     if (error) return { ok: false, msg: 'حدث خطأ أثناء الحفظ' };
     return { ok: true };
   },
@@ -123,7 +106,7 @@ const DB = {
     if (!this._ensure()) return { ok: false, msg: 'قاعدة البيانات غير متصلة' };
     const dup = await _sbClient.from('employees').select('id').eq('code', data.code).neq('id', id).maybeSingle();
     if (dup.data) return { ok: false, msg: 'الكود مستخدم بالفعل' };
-    const { error } = await _sbClient.from('employees').update({ name: data.name, code: data.code, hospital: data.hospital || null }).eq('id', id);
+    const { error } = await _sbClient.from('employees').update({ name: data.name, code: data.code, hospital: data.hospital || null, department: data.department || null }).eq('id', id);
     if (error) return { ok: false, msg: 'الموظف غير موجود' };
     return { ok: true };
   },
@@ -138,7 +121,7 @@ const DB = {
     if (error) { console.error(error); return null; }
     return data ? this._mapEmpOut(data) : null;
   },
-  _mapEmpOut(e) { return { id: e.id, name: e.name, code: e.code, hospital: e.hospital, createdAt: e.created_at }; },
+  _mapEmpOut(e) { return { id: e.id, name: e.name, code: e.code, hospital: e.hospital, department: e.department, createdAt: e.created_at }; },
 
   /* ---- أقسام ---- */
   async getDepartments() {
@@ -520,7 +503,7 @@ const AdminApp = {
     const tbody = document.getElementById('employeesBody');
     if (!tbody) return;
     if (!emps.length) {
-      tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><i class="fas fa-id-card"></i><p>${search ? 'لا توجد نتائج' : 'لم يتم إضافة موظفين بعد'}</p></div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state"><i class="fas fa-id-card"></i><p>${search ? 'لا توجد نتائج' : 'لم يتم إضافة موظفين بعد'}</p></div></td></tr>`;
       return;
     }
     tbody.innerHTML = emps.map((e, i) => `
@@ -529,6 +512,7 @@ const AdminApp = {
         <td><strong>${e.name}</strong></td>
         <td><code style="background:#f0f4f8;padding:3px 10px;border-radius:6px;font-size:13px;letter-spacing:1px">${e.code}</code></td>
         <td>${e.hospital || '<span class="text-muted">—</span>'}</td>
+        <td>${e.department || '<span class="text-muted">—</span>'}</td>
         <td style="font-size:13px;color:var(--text-muted)">${DB.formatDate(e.createdAt)}</td>
         <td><div class="actions">
           <button class="btn btn-outline btn-sm btn-icon" title="تعديل" onclick="AdminApp.editEmployee('${e.id}')"><i class="fas fa-edit"></i></button>
@@ -537,11 +521,12 @@ const AdminApp = {
       </tr>`).join('');
   },
 
-  openEmpModal(emp) {
+  async openEmpModal(emp) {
     document.getElementById('empEditId').value = emp?.id || '';
     document.getElementById('empName').value = emp?.name || '';
     document.getElementById('empCode').value = emp?.code || '';
     document.getElementById('empHospital').value = emp?.hospital || '';
+    await this.loadDeptOptions('empDept','empHospital', emp?.department);
     document.getElementById('empModalTitle').textContent = emp ? 'تعديل بيانات الموظف' : 'إضافة موظف جديد';
     this.openModal('empModal');
   },
@@ -549,7 +534,7 @@ const AdminApp = {
   async editEmployee(id) {
     const emps = await DB.getEmployees();
     const emp = emps.find(e => e.id === id);
-    if (emp) this.openEmpModal(emp);
+    if (emp) await this.openEmpModal(emp);
   },
 
   async saveEmployee() {
@@ -557,14 +542,15 @@ const AdminApp = {
     const name = document.getElementById('empName').value.trim();
     const code = document.getElementById('empCode').value.trim().toUpperCase();
     const hospital = document.getElementById('empHospital').value;
+    const department = document.getElementById('empDept').value;
 
     if (!name) return Toast.show('يرجى إدخال اسم الموظف', 'error');
     if (!code) return Toast.show('يرجى إدخال الكود الخاص', 'error');
     if (!/^[A-Z0-9\-_]+$/i.test(code)) return Toast.show('الكود يجب أن يحتوي على حروف وأرقام فقط', 'error');
 
     const result = id
-      ? await DB.updateEmployee(id, { name, code, hospital })
-      : await DB.addEmployee({ name, code, hospital });
+      ? await DB.updateEmployee(id, { name, code, hospital, department })
+      : await DB.addEmployee({ name, code, hospital, department });
 
     if (!result.ok) return Toast.show(result.msg, 'error');
     Toast.show(id ? 'تم تحديث بيانات الموظف' : 'تمت إضافة الموظف بنجاح', 'success');
@@ -1118,15 +1104,15 @@ const EmployeeApp = {
     }
   },
 
-  async loadDepts() {
+  loadDepts() {
     const hospital = document.getElementById('repHospital').value;
     const select = document.getElementById('repDept');
     select.innerHTML = '<option value="">-- اختر القسم --</option>';
     if (hospital) {
-      const depts = await DB.getDeptsByHospital(hospital);
-      depts.forEach(d => {
+      const depts = DB.DEFAULT_DEPARTMENTS[hospital] || [];
+      depts.forEach(name => {
         const opt = document.createElement('option');
-        opt.value = d.name; opt.textContent = d.name;
+        opt.value = name; opt.textContent = name;
         select.appendChild(opt);
       });
     }

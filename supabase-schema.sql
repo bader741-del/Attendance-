@@ -35,8 +35,12 @@ create table if not exists employees (
   name text not null,
   code text not null unique,
   hospital text,
+  department text,
   created_at timestamptz not null default now()
 );
+
+-- إن كان هذا الجدول قد أُنشئ سابقاً بدون عمود القسم، أضفه الآن (آمن للتنفيذ المتكرر)
+alter table employees add column if not exists department text;
 
 -- ---------- جدول جداول الدوام ----------
 create table if not exists shifts (
