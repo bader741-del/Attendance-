@@ -186,6 +186,30 @@ textarea.form-control { resize: vertical; min-height: 90px; }
 .stat-value { font-size: 28px; font-weight: 800; line-height: 1.1; color: var(--text); }
 .stat-label { font-size: 13px; color: var(--text-light); margin-top: 2px; }
 
+/* ======== مؤشرات الأداء (KPI) ======== */
+.kpi-section-title {
+  font-size: 14px; font-weight: 700; color: var(--text-light);
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 12px;
+}
+.kpi-section-title i { color: var(--secondary); }
+
+.kpi-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.kpi-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  box-shadow: var(--shadow);
+  border-top: 3px solid var(--secondary);
+  transition: transform var(--transition), box-shadow var(--transition);
+}
+.kpi-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
+.kpi-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.kpi-label { font-size: 13px; font-weight: 600; color: var(--text-light); display: flex; align-items: center; gap: 6px; }
+.kpi-label i { color: var(--secondary); font-size: 14px; }
+.kpi-value { font-size: 26px; font-weight: 800; color: var(--text); }
+.kpi-trend { font-size: 12px; }
+
 /* ======== جداول البيانات ======== */
 .table-wrapper {
   background: var(--surface);
@@ -744,4 +768,194 @@ textarea.form-control { resize: vertical; min-height: 90px; }
   .main-content { margin-right: 0; }
   .content-area { padding: 0; }
   .section-content { display: block !important; }
+}
+
+/* ============================================================
+   إضافات: الوضع الليلي، التنبيهات، التوقيع، تحسينات الجوال
+   ============================================================ */
+
+/* ======== الوضع الليلي ======== */
+[data-theme="dark"] {
+  --primary:        #4a7fb5;
+  --primary-dark:   #0f2640;
+  --primary-hover:  #5a8fc5;
+  --secondary:      #5dade2;
+  --accent:         #1abc9c;
+  --accent-dark:    #17a589;
+
+  --bg:             #10161f;
+  --surface:        #1a2332;
+  --surface-2:      #212c3d;
+  --border:         #2e3d52;
+  --border-light:   #283548;
+
+  --text:           #e8eef5;
+  --text-light:     #a9b8cc;
+  --text-muted:     #7688a0;
+
+  --success:        #2ecc71;
+  --success-bg:     #16301f;
+  --success-border: #1e5e38;
+  --danger:         #ff6b5b;
+  --danger-bg:      #351b18;
+  --danger-border:  #6e2c24;
+  --warning:        #f39c12;
+  --warning-bg:     #33260f;
+  --warning-border: #6e5417;
+  --info:           #5dade2;
+  --info-bg:        #16283a;
+  --info-border:    #24486a;
+  --pending:        #af7ac5;
+  --pending-bg:     #2a1c33;
+  --pending-border: #4e3260;
+
+  --shadow:         0 2px 16px rgba(0,0,0,0.4);
+  --shadow-md:      0 4px 28px rgba(0,0,0,0.5);
+  --shadow-lg:      0 8px 40px rgba(0,0,0,0.6);
+}
+
+[data-theme="dark"] .index-card,
+[data-theme="dark"] .login-box { background: var(--surface); color: var(--text); }
+[data-theme="dark"] .emp-form-container { background: var(--surface); }
+[data-theme="dark"] code { background: var(--surface-2) !important; color: var(--text); }
+[data-theme="dark"] .data-table th { background: var(--surface-2); }
+
+/* زر تبديل الوضع */
+.theme-toggle { position: relative; font-size: 16px; }
+.theme-toggle-float {
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  z-index: 999;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+}
+
+/* ======== التنبيهات (الجرس) ======== */
+.notif-wrap { position: relative; }
+.notif-count {
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  background: var(--danger);
+  color: #fff;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+.notif-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  width: 330px;
+  max-width: calc(100vw - 30px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  z-index: 300;
+  display: none;
+  overflow: hidden;
+}
+.notif-dropdown.open { display: block; }
+.notif-header {
+  padding: 12px 16px;
+  font-weight: 700;
+  font-size: 14px;
+  border-bottom: 1px solid var(--border-light);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--primary);
+}
+.notif-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-light);
+  transition: background var(--transition);
+}
+.notif-item:hover { background: var(--surface-2); }
+.notif-item:last-child { border-bottom: none; }
+.notif-item i { margin-top: 2px; }
+.notif-danger i  { color: var(--danger); }
+.notif-warning i { color: var(--warning); }
+.notif-info i    { color: var(--info); }
+.notif-empty {
+  padding: 26px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.notif-empty i { color: var(--success); margin-left: 6px; }
+
+/* لوحة التنبيهات في لوحة التحكم */
+.alert-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 8px;
+  border: 1px solid;
+  transition: transform var(--transition);
+}
+.alert-row:hover { transform: translateX(-3px); }
+.alert-danger  { background: var(--danger-bg);  border-color: var(--danger-border);  color: var(--danger); }
+.alert-warning { background: var(--warning-bg); border-color: var(--warning-border); color: var(--warning); }
+.alert-info    { background: var(--info-bg);    border-color: var(--info-border);    color: var(--info); }
+
+/* ======== لوحة التوقيع ======== */
+.sig-canvas {
+  width: 100%;
+  max-width: 480px;
+  height: 160px;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  cursor: crosshair;
+  touch-action: none;
+  display: block;
+}
+.signature-block {
+  background: var(--success-bg);
+  border: 1px solid var(--success-border);
+  border-radius: var(--radius-sm);
+  padding: 14px 18px;
+}
+[data-theme="dark"] .sig-canvas { background: #e8eef5; }
+#sigPreview img { background: #fff; border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; }
+
+/* ======== تحسينات الجوال ======== */
+@media (max-width: 640px) {
+  .hide-mobile { display: none !important; }
+  .stat-cards { grid-template-columns: repeat(2, 1fr) !important; }
+  .kpi-cards  { grid-template-columns: repeat(2, 1fr) !important; }
+  .filter-bar { gap: 8px; }
+  .filter-group { min-width: calc(50% - 8px); }
+  .table-header { flex-wrap: wrap; gap: 10px; }
+  .table-actions { flex-wrap: wrap; }
+  .content-card-header { flex-wrap: wrap; gap: 10px; }
+  .theme-toggle-float { top: 10px; left: 10px; }
+  .modal-box { max-height: 92vh; overflow-y: auto; }
 }
