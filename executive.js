@@ -140,6 +140,7 @@ const ExecutiveApp = {
   renderAll() {
     const ctx = this._buildContext();
     this._ctx = ctx;                    // يُستخدم في التصدير
+    this.renderSummary();
     this.renderKPIs(ctx);
     this.renderAlerts(ctx);
     this.renderCompare(ctx);
@@ -151,7 +152,36 @@ const ExecutiveApp = {
     this.renderKpiProgress(ctx);
     this.renderHeatmap(ctx);
     this.renderTopPerformers(ctx);
+    this.renderAttentionDepts(ctx);
     this.renderInsights(ctx);
+  },
+
+  /* ======================================================
+     9-ب) أقسام تتطلب متابعة
+     حضور أقل من 85% أو غياب فوق العتبة — الأسوأ أولاً
+     ====================================================== */
+  renderAttentionDepts(ctx) {
+    const box = document.getElementById('execAttentionDepts');
+    if (!box) return;
+    const list = ctx.departments
+      .filter(d => d.stats.rate !== null &&
+        (d.stats.rate < Analytics.THRESHOLDS.yellow || d.stats.absenceRate > Analytics.ABSENCE_THRESHOLD))
+      .sort((a, b) => a.stats.rate - b.stats.rate)
+      .slice(0, 6);
+
+    box.innerHTML = list.length
+      ? list.map(d => {
+          const st = Analytics.statusOf(d.stats.rate);
+          return `
+          <div class="exec-attention-row">
+            <span class="hosp-status-badge ${st.cls}">${st.emoji} ${this._pct(d.stats.rate)}</span>
+            <div class="exec-attention-info">
+              <b>${esc(d.department)}</b>
+              <span>${esc(d.hospital)} — غياب ${this._pct(d.stats.absenceRate)} · ${d.stats.count} تقرير</span>
+            </div>
+          </div>`;
+        }).join('')
+      : `<div class="exec-alert ok" style="margin:0"><i class="fas fa-circle-check"></i><span>لا توجد أقسام تتطلب متابعة في الفترة المحددة</span></div>`;
   },
 
   /* ---- مساعدات عرض صغيرة ---- */
@@ -163,6 +193,53 @@ const ExecutiveApp = {
     const up = d > 0;
     return `<span class="exec-kpi-trend" style="color:var(--${up ? 'success' : 'danger'})">
       <i class="fas fa-arrow-${up ? 'up' : 'down'}"></i> ${Math.abs(d)}</span>`;
+  },
+
+  /* ======================================================
+     4-ب) الملخص التنفيذي — لقطة «اليوم» دائماً
+     مستقل عن الفلتر المحدد: صانع القرار يرى حالة اليوم أولاً
+     ====================================================== */
+  renderSummary() {
+    const bar = document.getElementById('execSummary');
+    if (!bar) return;
+
+    const today = DB.today();
+    const reps = Analytics.reports({ from: today, to: today });
+    const stats = Analytics.sumStats(reps);
+    const comp = Analytics.compliance({ from: today, to: today });
+    const status = Analytics.statusOf(stats.rate);
+
+    // مستشفيات تحتاج انتباهاً اليوم: حضور <85% أو بلا أي تقرير
+    const attention = DB.HOSPITALS.filter(h => {
+      const s = Analytics.sumStats(reps.filter(r => r.hospital === h));
+      return s.rate === null || s.rate < Analytics.THRESHOLDS.yellow;
+    });
+
+    const pending = DB.getReports().filter(r => r.status === 'pending').length;
+
+    // التنبيهات الحرجة اليوم: مستشفى حرج + ارتفاع غياب (نفس منطق renderAlerts على نطاق اليوم)
+    const yesterday = Analytics.prevRange(today, today);
+    const yStats = Analytics.sumStats(Analytics.reports(yesterday));
+    let critical = DB.HOSPITALS.filter(h => {
+      const s = Analytics.sumStats(reps.filter(r => r.hospital === h));
+      return s.rate !== null && s.rate < Analytics.THRESHOLDS.yellow;
+    }).length;
+    if (stats.absenceRate !== null && yStats.absenceRate !== null &&
+        stats.absenceRate - yStats.absenceRate >= 3) critical++;
+
+    const item = (icon, label, value, cls = '') => `
+      <div class="exec-summary-item ${cls}">
+        <i class="fas ${icon}"></i>
+        <div><b>${value}</b><span>${label}</span></div>
+      </div>`;
+
+    bar.innerHTML =
+      item('fa-flag', 'الحالة العامة', `${status.emoji} ${status.label}`) +
+      item('fa-user-check', 'حضور اليوم', this._pct(stats.rate)) +
+      item('fa-clipboard-check', 'التزام اليوم', this._pct(comp.rate)) +
+      item('fa-hospital', 'مستشفيات تحتاج انتباهاً', attention.length, attention.length ? 'warn' : '') +
+      item('fa-hourglass-half', 'تقارير معلقة', pending, pending ? 'warn' : '') +
+      item('fa-triangle-exclamation', 'تنبيهات حرجة', critical, critical ? 'crit' : '');
   },
 
   /* ======================================================

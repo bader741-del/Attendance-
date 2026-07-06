@@ -58,6 +58,7 @@
       <button class="btn btn-ghost btn-icon" title="تصدير PDF" onclick="ExecutiveApp.exportPDF()"><i class="fas fa-file-pdf"></i></button>
       <button class="btn btn-ghost btn-icon" title="طباعة" onclick="ExecutiveApp.printPage()"><i class="fas fa-print"></i></button>
     </div>
+    <a href="hospital-map.html" class="btn btn-ghost btn-icon" title="خريطة العمليات"><i class="fas fa-map-location-dot"></i></a>
     <button class="btn btn-ghost btn-icon" title="تحديث الآن" onclick="ExecutiveApp.refresh(false)"><i class="fas fa-rotate"></i></button>
     <button class="btn btn-ghost btn-icon theme-toggle" title="الوضع الليلي / النهاري" onclick="Theme.toggle()"><i class="fas fa-moon"></i></button>
     <button class="btn btn-ghost btn-icon" title="تسجيل الخروج" onclick="ExecutiveApp.logout()"><i class="fas fa-sign-out-alt"></i></button>
@@ -70,6 +71,9 @@
       <h1>مركز القيادة التنفيذي — مدينة الملك سلمان الطبية</h1>
       <p id="execPrintRange"></p>
     </div>
+
+    <!-- الملخص التنفيذي — لقطة اليوم دائماً (مستقلة عن الفلتر) -->
+    <div class="exec-summary" id="execSummary"></div>
 
     <!-- الفلاتر السريعة (مكوّن الشرائح المشترك من hospital-map.css) -->
     <div class="map-filters">
@@ -179,7 +183,13 @@
     <div class="exec-section-title"><i class="fas fa-award"></i> الأفضل أداءً</div>
     <div class="exec-top-grid" id="execTopGrid"></div>
 
-    <!-- 9) الرؤى الذكية -->
+    <!-- 9) أقسام تتطلب متابعة -->
+    <div class="exec-panel">
+      <div class="exec-panel-title"><i class="fas fa-magnifying-glass-chart" style="color:var(--warning)"></i> أقسام تتطلب متابعة</div>
+      <div class="exec-attention" id="execAttentionDepts"></div>
+    </div>
+
+    <!-- 10) الرؤى الذكية -->
     <div class="exec-section-title"><i class="fas fa-lightbulb"></i> رؤى إدارية آلية</div>
     <div class="exec-insights" id="execInsights"></div>
 

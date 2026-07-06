@@ -67,6 +67,46 @@
   white-space: nowrap;
 }
 
+/* ======== الملخص التنفيذي (لقطة اليوم) ======== */
+.exec-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+}
+.exec-summary-item {
+  background: linear-gradient(160deg, var(--primary-dark), #17395e);
+  color: #fff;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.exec-summary-item i { font-size: 18px; color: var(--accent); flex-shrink: 0; }
+.exec-summary-item b { display: block; font-size: 18px; line-height: 1.2; }
+.exec-summary-item span { font-size: 11.5px; opacity: .75; font-weight: 600; }
+.exec-summary-item.warn i { color: #f5b041; }
+.exec-summary-item.crit i { color: #ff8a7a; }
+.exec-summary-item.crit b { color: #ff8a7a; }
+
+/* ======== أقسام تتطلب متابعة ======== */
+.exec-attention { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
+.exec-attention-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+}
+.exec-attention-info b { display: block; font-size: 13.5px; color: var(--text); }
+.exec-attention-info span { font-size: 11.5px; color: var(--text-muted); }
+
 /* ======== عناوين الأقسام ======== */
 .exec-section-title {
   display: flex;
