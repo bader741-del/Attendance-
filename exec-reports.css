@@ -1,0 +1,219 @@
+/* ============================================================
+   نظام التقارير التنفيذية — الأنماط (المرحلة 15)
+   exec-reports.css
+   ------------------------------------------------------------
+   ملف مستقل لا يعدّل أي نمط قائم. يُحمَّل بعد style.css
+   وhospital-map.css وexecutive.css ويعيد استخدام مكوّناتها
+   (اللوحات، الشارات، الشرائح) — متوافق مع الوضع الليلي والجوال.
+   ============================================================ */
+
+/* ======== هيكل الصفحة ======== */
+.rpt-page {
+  min-height: 100vh;
+  background: var(--bg);
+  display: none;               /* تُظهر بعد التحقق من الجلسة */
+  flex-direction: column;
+}
+.rpt-body {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* ======== لوحة إنشاء التقرير (المُنشئ) ======== */
+.rpt-builder {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+.rpt-builder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.rpt-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-light);
+  margin-bottom: 5px;
+}
+.rpt-field select,
+.rpt-field input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: 'Cairo', sans-serif;
+  font-size: 13px;
+}
+.rpt-builder-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-light);
+}
+.rpt-toggles { display: flex; gap: 14px; flex-wrap: wrap; margin-right: auto; }
+.rpt-toggles label {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--text-light); cursor: pointer;
+}
+
+/* ======== معاينة التقرير (مظهر مستند رسمي) ======== */
+.rpt-preview-wrap { display: none; }
+.rpt-preview-wrap.show { display: block; }
+
+.rpt-doc {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  padding: 28px 32px;
+  max-width: 1050px;
+  margin: 0 auto;
+}
+
+/* ترويسة المستند الرسمية */
+.rpt-doc-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 3px double var(--primary);
+  padding-bottom: 16px;
+  margin-bottom: 18px;
+}
+.rpt-logo {
+  width: 58px; height: 58px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--primary), var(--secondary));
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px;
+  flex-shrink: 0;
+}
+.rpt-doc-header .rpt-head-text { flex: 1; }
+.rpt-doc-header h1 { font-size: 18px; color: var(--text); margin-bottom: 2px; }
+.rpt-doc-header .rpt-platform { font-size: 12.5px; color: var(--text-light); font-weight: 600; }
+.rpt-doc-header .rpt-meta {
+  text-align: left;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.9;
+  white-space: nowrap;
+}
+
+.rpt-section-h {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14.5px; font-weight: 800; color: var(--primary);
+  border-right: 4px solid var(--accent);
+  padding-right: 10px;
+  margin: 22px 0 12px;
+}
+[data-theme="dark"] .rpt-section-h { color: var(--secondary); }
+
+/* بطاقات الملخص داخل المستند */
+.rpt-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+.rpt-summary-item {
+  background: var(--surface-2);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+.rpt-summary-item b { display: block; font-size: 16px; color: var(--text); }
+.rpt-summary-item span { font-size: 11px; color: var(--text-muted); font-weight: 700; }
+
+/* جداول المستند */
+.rpt-doc .data-table { font-size: 12.5px; }
+.rpt-doc .data-table th { background: var(--surface-2); }
+
+/* شبكة رسوم المستند */
+.rpt-charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.rpt-chart-box {
+  background: var(--surface-2);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+.rpt-chart-box .t { font-size: 12.5px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+.rpt-chart-canvas { position: relative; height: 220px; }
+
+/* الملاحظات الآلية */
+.rpt-observations { display: flex; flex-direction: column; gap: 8px; }
+.rpt-obs {
+  display: flex; align-items: flex-start; gap: 9px;
+  font-size: 13px; color: var(--text); line-height: 1.8;
+  background: var(--surface-2);
+  border: 1px solid var(--border-light);
+  border-right: 4px solid var(--secondary);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+}
+.rpt-obs i { margin-top: 4px; color: var(--secondary); }
+.rpt-obs.up i   { color: var(--success); } .rpt-obs.up   { border-right-color: var(--success); }
+.rpt-obs.down i { color: var(--danger); }  .rpt-obs.down { border-right-color: var(--danger); }
+.rpt-obs.warn i { color: var(--warning); } .rpt-obs.warn { border-right-color: var(--warning); }
+
+/* تذييل المستند */
+.rpt-doc-footer {
+  margin-top: 24px;
+  padding-top: 12px;
+  border-top: 2px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ======== تجاوب ======== */
+@media (max-width: 768px) {
+  .rpt-body { padding: 12px; }
+  .rpt-doc { padding: 16px; }
+  .rpt-charts-grid { grid-template-columns: 1fr; }
+  .rpt-doc-header { flex-wrap: wrap; }
+  .rpt-doc-header .rpt-meta { text-align: right; }
+}
+
+/* ======== الطباعة / PDF ========
+   يُطبع المستند وحده بترويسة وتذييل ثابتين يتكرران على كل
+   صفحة (position: fixed يتكرر عند الطباعة في المتصفحات).
+   أرقام الصفحات: تُفعَّل من خيارات نافذة الطباعة (ترويسة
+   وتذييل المتصفح) — قيد معروف في @page لدى المتصفحات.
+   =============================================== */
+@media print {
+  body { background: #fff !important; }
+  .rpt-topbar, .rpt-builder, .theme-toggle, .toast-container { display: none !important; }
+  .rpt-page { display: block !important; }
+  .rpt-preview-wrap { display: block !important; }
+  .rpt-body { padding: 0; max-width: 100%; }
+  .rpt-doc { box-shadow: none; border: none; border-radius: 0; max-width: 100%; padding: 0 4mm 14mm; }
+  .rpt-print-footer { display: flex !important; }
+  .rpt-chart-box, .rpt-summary-item, .rpt-obs, table { break-inside: avoid; }
+  .rpt-section-h { break-after: avoid; }
+  @page { margin: 14mm 10mm 18mm; }
+}
+.rpt-print-footer {
+  display: none;
+  position: fixed;
+  bottom: 0; right: 0; left: 0;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #5a6a7e;
+  border-top: 1px solid #d5dde8;
+  padding: 3px 6px;
+  background: #fff;
+}
