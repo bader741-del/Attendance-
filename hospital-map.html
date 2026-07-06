@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>خريطة عمليات المستشفيات - منصة مراقبة الدوام</title>
+  <meta name="theme-color" content="#1a3a5c">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="hospital-map.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+</head>
+<body data-page="map">
+
+<!-- ===== بوابة دخول المسؤول (نفس نمط لوحة المسؤول) ===== -->
+<div class="login-overlay" id="mapLogin" style="display:none">
+  <div class="login-box">
+    <div class="login-icon"><i class="fas fa-map-location-dot"></i></div>
+    <h2 class="login-title">خريطة عمليات المستشفيات</h2>
+    <p class="login-desc">أدخل كلمة مرور المسؤول للوصول إلى الخريطة</p>
+    <div class="login-error" id="mapLoginError">كلمة المرور غير صحيحة، حاول مجدداً</div>
+    <div class="form-group">
+      <label>كلمة المرور <span class="required">*</span></label>
+      <input type="password" id="mapPassInput" class="form-control" placeholder="أدخل كلمة المرور" autocomplete="current-password">
+    </div>
+    <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:8px" onclick="HospitalMap.login()">
+      <i class="fas fa-sign-in-alt"></i> دخول
+    </button>
+    <div style="text-align:center;margin-top:14px">
+      <a href="index.html" style="font-size:13px;color:var(--text-light)"><i class="fas fa-arrow-right"></i> العودة للرئيسية</a>
+    </div>
+  </div>
+</div>
+
+<!-- ===== محتوى الصفحة ===== -->
+<div class="map-page" id="mapContent">
+
+  <!-- الشريط العلوي -->
+  <header class="map-topbar">
+    <a href="admin.html" class="btn btn-ghost btn-icon" title="العودة للوحة المسؤول"><i class="fas fa-arrow-right"></i></a>
+    <div class="map-topbar-title">
+      <i class="fas fa-map-location-dot"></i>
+      <span>خريطة عمليات المستشفيات</span>
+    </div>
+    <div class="map-live">
+      <span class="pulse-dot"></span>
+      <span>بيانات حية · آخر تحديث <span id="mapLastRefresh">—</span></span>
+    </div>
+    <button class="btn btn-ghost btn-icon" title="تحديث الآن" onclick="HospitalMap.refresh(false)"><i class="fas fa-rotate"></i></button>
+    <button class="btn btn-ghost btn-icon theme-toggle" title="الوضع الليلي / النهاري" onclick="Theme.toggle()"><i class="fas fa-moon"></i></button>
+    <button class="btn btn-ghost btn-icon" title="تسجيل الخروج" onclick="HospitalMap.logout()"><i class="fas fa-sign-out-alt"></i></button>
+  </header>
+
+  <div class="map-body">
+
+    <!-- شريط الفلاتر الزمنية -->
+    <div class="map-filters">
+      <i class="fas fa-filter" style="color:var(--secondary)"></i>
+      <button class="map-filter-chip active" data-preset="today"     onclick="HospitalMap.applyPreset('today')">اليوم</button>
+      <button class="map-filter-chip"        data-preset="yesterday" onclick="HospitalMap.applyPreset('yesterday')">أمس</button>
+      <button class="map-filter-chip"        data-preset="week"      onclick="HospitalMap.applyPreset('week')">هذا الأسبوع</button>
+      <button class="map-filter-chip"        data-preset="month"     onclick="HospitalMap.applyPreset('month')">هذا الشهر</button>
+      <button class="map-filter-chip"        data-preset="custom"    onclick="HospitalMap.applyPreset('custom')">نطاق مخصص</button>
+      <div class="map-custom-range" id="mapCustomRange">
+        <input type="date" id="mapFromDate" aria-label="من تاريخ">
+        <span style="color:var(--text-muted);font-size:13px">إلى</span>
+        <input type="date" id="mapToDate" aria-label="إلى تاريخ">
+        <button class="btn btn-primary" style="padding:6px 14px;font-size:13px" onclick="HospitalMap.applyCustomRange()">تطبيق</button>
+      </div>
+      <span class="map-range-label" id="mapRangeLabel"></span>
+    </div>
+
+    <!-- الخريطة التفاعلية -->
+    <div class="map-leaflet-card" id="mapLeafletCard">
+      <div class="map-leaflet-head">
+        <i class="fas fa-location-dot"></i> مواقع المستشفيات — اضغط على العلامة لعرض التفاصيل
+      </div>
+      <div id="hospLeafletMap"></div>
+    </div>
+
+    <!-- بطاقات المستشفيات (تُبنى من hospital-map.js) -->
+    <div class="hosp-grid" id="hospCardsGrid"></div>
+
+  </div>
+</div>
+
+<!-- ===== المودال التفصيلي للمستشفى ===== -->
+<div class="modal-overlay" id="hospDetailModal">
+  <div class="modal-box hosp-modal">
+    <div class="modal-header">
+      <span class="modal-title" id="hospDetailTitle"><i class="fas fa-hospital"></i> —</span>
+      <button class="modal-close" onclick="HospitalMap.closeDetail()"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body">
+
+      <p id="hospDetailRange" style="font-size:13px;color:var(--text-muted);margin-bottom:14px"></p>
+
+      <!-- مؤشرات سريعة -->
+      <div class="hosp-detail-kpis" id="hospDetailKpis"></div>
+
+      <!-- الرسوم البيانية -->
+      <div class="hosp-detail-charts">
+        <div class="hosp-chart-box">
+          <div class="hosp-chart-title"><i class="fas fa-chart-area"></i> اتجاه الحضور والغياب</div>
+          <div class="hosp-chart-canvas"><canvas id="hospChartTrend"></canvas></div>
+        </div>
+        <div class="hosp-chart-box">
+          <div class="hosp-chart-title"><i class="fas fa-chart-bar"></i> نسبة الحضور حسب القسم</div>
+          <div class="hosp-chart-canvas"><canvas id="hospChartDepts"></canvas></div>
+        </div>
+      </div>
+
+      <!-- إحصائيات الأقسام -->
+      <div class="hosp-chart-box" style="margin-bottom:16px">
+        <div class="hosp-chart-title"><i class="fas fa-sitemap"></i> إحصائيات الأقسام (الفترة المحددة)</div>
+        <div class="hosp-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>القسم</th><th>حاضر</th><th>غائب</th><th>إجازة</th><th>منسحب</th><th>نسبة الحضور</th><th>الحالة</th></tr>
+            </thead>
+            <tbody id="hospDeptBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- تبويبات التقارير -->
+      <div class="hosp-tabs">
+        <button class="hosp-tab active" data-tab="daily"   onclick="HospitalMap.showTab('daily')"><i class="fas fa-calendar-day"></i> التقارير اليومية</button>
+        <button class="hosp-tab"        data-tab="weekly"  onclick="HospitalMap.showTab('weekly')"><i class="fas fa-calendar-week"></i> التقارير الأسبوعية</button>
+        <button class="hosp-tab"        data-tab="monthly" onclick="HospitalMap.showTab('monthly')"><i class="fas fa-calendar"></i> التقارير الشهرية</button>
+      </div>
+      <div class="hosp-table-wrap">
+        <table class="data-table">
+          <thead id="hospTabHead"></thead>
+          <tbody id="hospTabBody"></tbody>
+        </table>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- الترتيب مهم: Supabase ← الإعدادات ← الطبقات المشتركة ← وحدة الخريطة -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="script.js"></script>
+<script src="hospital-map.js"></script>
+</body>
+</html>
