@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>لوحة المسؤول - منصة مراقبة الدوام</title>
+  <meta name="theme-color" content="#1a3a5c">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+</head>
+<body data-page="admin">
+
+<!-- ===== شاشة تسجيل دخول المسؤول ===== -->
+<div class="login-overlay" id="adminLogin">
+  <div class="login-box">
+    <div class="login-icon"><i class="fas fa-shield-halved"></i></div>
+    <h2 class="login-title">دخول المسؤول</h2>
+    <p class="login-desc">أدخل كلمة المرور للوصول إلى لوحة التحكم</p>
+    <div class="login-error" id="loginError">كلمة المرور غير صحيحة، حاول مجدداً</div>
+    <div class="form-group">
+      <label>كلمة المرور <span class="required">*</span></label>
+      <input type="password" id="adminPassInput" class="form-control" placeholder="أدخل كلمة المرور" autocomplete="current-password">
+    </div>
+    <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:8px" onclick="AdminApp.login()">
+      <i class="fas fa-sign-in-alt"></i> دخول
+    </button>
+    <div style="margin-top:18px;text-align:center">
+      <a href="index.html" style="font-size:13px;color:var(--text-light)"><i class="fas fa-arrow-right"></i> العودة للرئيسية</a>
+    </div>
+  </div>
+</div>
+
+<!-- ===== تخطيط لوحة التحكم ===== -->
+<div class="admin-layout" id="adminContent" style="display:none">
+
+  <!-- Sidebar Overlay للجوال -->
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="AdminApp.toggleSidebar()"></div>
+
+  <!-- ===== الشريط الجانبي ===== -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-logo">
+        <div class="sidebar-logo-icon"><i class="fas fa-hospital-user"></i></div>
+        <div class="sidebar-logo-text">
+          <strong>منصة مراقبة الدوام</strong>
+          <span>مدينة الملك سلمان الطبية</span>
+        </div>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <span class="nav-section-label">الرئيسية</span>
+      <div class="nav-item active" data-section="dashboard" onclick="AdminApp.showSection('dashboard')">
+        <i class="fas fa-chart-pie"></i> لوحة التحكم
+      </div>
+
+      <span class="nav-section-label">التحليلات</span>
+      <div class="nav-item" data-section="analytics" onclick="AdminApp.showSection('analytics')">
+        <i class="fas fa-chart-line"></i> التحليلات الذكية
+      </div>
+
+      <span class="nav-section-label">الإدارة</span>
+      <div class="nav-item" data-section="employees" onclick="AdminApp.showSection('employees')">
+        <i class="fas fa-id-card"></i> أكواد الموظفين
+      </div>
+      <div class="nav-item" data-section="shifts" onclick="AdminApp.showSection('shifts')">
+        <i class="fas fa-calendar-alt"></i> جداول الدوام
+      </div>
+      <div class="nav-item" data-section="departments" onclick="AdminApp.showSection('departments')">
+        <i class="fas fa-sitemap"></i> إدارة الأقسام
+      </div>
+
+      <span class="nav-section-label">التقارير</span>
+      <div class="nav-item" data-section="reports" onclick="AdminApp.showSection('reports')">
+        <i class="fas fa-clipboard-list"></i> سجل التقارير
+        <span class="badge-count" id="pendingBadge" style="display:none">0</span>
+      </div>
+      <div class="nav-item" data-section="daily" onclick="AdminApp.showSection('daily')">
+        <i class="fas fa-calendar-day"></i> تقرير يومي
+      </div>
+      <div class="nav-item" data-section="weekly" onclick="AdminApp.showSection('weekly')">
+        <i class="fas fa-calendar-week"></i> تقرير أسبوعي
+      </div>
+      <div class="nav-item" data-section="monthly" onclick="AdminApp.showSection('monthly')">
+        <i class="fas fa-calendar"></i> تقرير شهري
+      </div>
+
+      <span class="nav-section-label">الإعدادات</span>
+      <div class="nav-item" data-section="audit" onclick="AdminApp.showSection('audit')">
+        <i class="fas fa-clipboard-check"></i> سجل التدقيق
+      </div>
+      <div class="nav-item" data-section="settings" onclick="AdminApp.showSection('settings')">
+        <i class="fas fa-cog"></i> الإعدادات
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="nav-item" onclick="AdminApp.logout()">
+        <i class="fas fa-sign-out-alt"></i> تسجيل الخروج
+      </div>
+    </div>
+  </aside>
+
+  <!-- ===== المحتوى الرئيسي ===== -->
+  <main class="main-content">
+    <div class="top-bar">
+      <div class="top-bar-right">
+        <button class="btn btn-ghost btn-icon sidebar-toggle" onclick="AdminApp.toggleSidebar()">
+          <i class="fas fa-bars"></i>
+        </button>
+        <span class="top-bar-title" id="topBarTitle">لوحة التحكم</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="font-size:13px;color:var(--text-light)" id="currentDateDisplay" class="hide-mobile"></span>
+
+        <!-- التنبيهات -->
+        <div class="notif-wrap" id="notifWrap">
+          <button class="btn btn-ghost btn-icon" title="التنبيهات" onclick="AdminApp.toggleNotif();event.stopPropagation()">
+            <i class="fas fa-bell"></i>
+            <span class="notif-count" id="notifCount" style="display:none">0</span>
+          </button>
+          <div class="notif-dropdown" id="notifDropdown">
+            <div class="notif-header"><i class="fas fa-bell"></i> التنبيهات</div>
+            <div id="notifList"></div>
+          </div>
+        </div>
+
+        <!-- الوضع الليلي -->
+        <button class="btn btn-ghost btn-icon theme-toggle" title="الوضع الليلي / النهاري" onclick="Theme.toggle()">
+          <i class="fas fa-moon"></i>
+        </button>
+
+        <div class="hide-mobile" style="display:flex;align-items:center;gap:7px;background:var(--success-bg);border:1px solid var(--success-border);border-radius:20px;padding:5px 12px;font-size:13px;color:var(--success);font-weight:600">
+          <span class="pulse-dot"></span>
+          مسؤول النظام
+        </div>
+      </div>
+    </div>
+
+    <div class="content-area">
+
+      <!-- ===== قسم لوحة التحكم ===== -->
+      <div class="section-content active" id="sec-dashboard">
+        <div class="dashboard-header">
+          <h2><i class="fas fa-chart-pie" style="color:var(--secondary);margin-left:8px"></i>لوحة التحكم</h2>
+          <p>نظرة عامة على إحصائيات الدوام والجولات</p>
+        </div>
+
+        <!-- لوحة التنبيهات -->
+        <div id="alertsPanel" style="display:none;margin-bottom:20px"></div>
+
+        <!-- تبويب الفترة -->
+        <div class="report-section-tabs" id="dashPeriodTabs">
+          <div class="report-tab active" data-period="daily" onclick="AdminApp.setDashPeriodTab('daily')"><i class="fas fa-calendar-day"></i> يومي</div>
+          <div class="report-tab" data-period="weekly" onclick="AdminApp.setDashPeriodTab('weekly')"><i class="fas fa-calendar-week"></i> أسبوعي</div>
+          <div class="report-tab" data-period="monthly" onclick="AdminApp.setDashPeriodTab('monthly')"><i class="fas fa-calendar"></i> شهري</div>
+        </div>
+
+        <!-- فلتر سريع -->
+        <div class="filter-bar" style="margin-bottom:20px">
+          <div class="filter-group">
+            <label>المستشفى</label>
+            <select class="form-control" id="dashHospital" onchange="AdminApp.loadDashboard()">
+              <option value="">الكل</option>
+              <option>مستشفى الطب النفسي</option>
+              <option>مستشفى النساء والأطفال</option>
+              <option>مستشفى المدينة الرئيسي</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>الفترة</label>
+            <select class="form-control" id="dashPeriod" onchange="AdminApp.loadDashboard()">
+              <option value="">الكل</option>
+              <option>صباحي</option>
+              <option>مسائي</option>
+              <option>ليلي</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>من تاريخ</label>
+            <input type="date" class="form-control" id="dashDateFrom" onchange="AdminApp.loadDashboard()">
+          </div>
+          <div class="filter-group">
+            <label>إلى تاريخ</label>
+            <input type="date" class="form-control" id="dashDateTo" onchange="AdminApp.loadDashboard()">
+          </div>
+          <div class="filter-actions">
+            <button class="btn btn-outline btn-sm" onclick="AdminApp.resetDashFilter()"><i class="fas fa-undo"></i> إعادة</button>
+          </div>
+        </div>
+
+        <!-- مؤشرات الأداء -->
+        <div class="kpi-section-title"><i class="fas fa-gauge-high"></i> مؤشرات الأداء الرئيسية</div>
+        <div class="kpi-cards" id="kpiCards">
+          <div class="kpi-card">
+            <div class="kpi-card-top">
+              <span class="kpi-label"><i class="fas fa-user-check"></i> معدل الحضور</span>
+              <span class="kpi-trend" id="kpiTrend-attendance"></span>
+            </div>
+            <div class="kpi-value" id="kpiVal-attendance">0%</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-card-top">
+              <span class="kpi-label"><i class="fas fa-user-times"></i> معدل الغياب</span>
+              <span class="kpi-trend" id="kpiTrend-absence"></span>
+            </div>
+            <div class="kpi-value" id="kpiVal-absence">0%</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-card-top">
+              <span class="kpi-label"><i class="fas fa-people-arrows"></i> نسبة التغطية</span>
+              <span class="kpi-trend" id="kpiTrend-coverage"></span>
+            </div>
+            <div class="kpi-value" id="kpiVal-coverage">0%</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-card-top">
+              <span class="kpi-label"><i class="fas fa-file-circle-check"></i> نسبة اعتماد التقارير</span>
+              <span class="kpi-trend" id="kpiTrend-approval"></span>
+            </div>
+            <div class="kpi-value" id="kpiVal-approval">0%</div>
+          </div>
+        </div>
+
+        <!-- بطاقات الإحصاء -->
+        <div class="stat-cards" id="statCards">
+          <div class="stat-card blue">
+            <div class="stat-icon"><i class="fas fa-users"></i></div>
+            <div class="stat-info"><div class="stat-value" id="stat-total">0</div><div class="stat-label">إجمالي الموظفين</div></div>
+          </div>
+          <div class="stat-card green">
+            <div class="stat-icon"><i class="fas fa-user-check"></i></div>
+            <div class="stat-info"><div class="stat-value" id="stat-present">0</div><div class="stat-label">إجمالي الحضور</div></div>
+          </div>
+          <div class="stat-card red">
+            <div class="stat-icon"><i class="fas fa-user-times"></i></div>
+            <div class="stat-info"><div class="stat-value" id="stat-absent">0</div><div class="stat-label">إجمالي الغياب</div></div>
+          </div>
+          <div class="stat-card orange">
+            <div class="stat-icon"><i class="fas fa-person-walking-arrow-right"></i></div>
+            <div class="stat-info"><div class="stat-value" id="stat-withdrawn">0</div><div class="stat-label">إجمالي الانسحاب</div></div>
+          </div>
+          <div class="stat-card purple">
+            <div class="stat-icon"><i class="fas fa-umbrella-beach"></i></div>
+            <div class="stat-info"><div class="stat-value" id="stat-leave">0</div><div class="stat-label">في إجازة</div></div>
+          </div>
+          <div class="stat-card teal">
+            <div class="stat-icon"><i class="fas fa-file-circle-check"></i></div>
+            <div class="stat-info"><div class="stat-value" id="stat-reports">0</div><div class="stat-label">إجمالي التقارير</div></div>
+          </div>
+        </div>
+
+        <!-- ملخص التقارير -->
+        <div class="charts-row">
+          <div class="summary-box">
+            <div class="summary-title"><i class="fas fa-chart-bar"></i> ملخص التقارير</div>
+            <div id="reportsSummaryTable"></div>
+          </div>
+          <div class="summary-box">
+            <div class="summary-title"><i class="fas fa-hospital"></i> توزيع حسب المستشفى</div>
+            <div id="hospitalSummaryTable"></div>
+          </div>
+        </div>
+
+        <!-- تقرير مقارنة المستشفيات الثلاث -->
+        <div class="table-wrapper" style="margin-bottom:20px">
+          <div class="table-header">
+            <span class="table-title"><i class="fas fa-hospital" style="color:var(--secondary);margin-left:8px"></i>تقرير مقارنة المستشفيات الثلاث</span>
+            <div class="table-actions">
+              <button class="btn btn-outline btn-sm" onclick="AdminApp.printHospitalCompare()"><i class="fas fa-print"></i> طباعة</button>
+              <button class="btn btn-success btn-sm" onclick="AdminApp.exportHospitalCompare()"><i class="fas fa-file-excel"></i> تصدير Excel</button>
+            </div>
+          </div>
+          <div class="table-overflow">
+            <table class="data-table">
+              <thead><tr>
+                <th>المستشفى</th><th>الحضور</th><th>الغياب</th><th>الانسحاب</th><th>الإجازة</th>
+                <th>معدل الحضور</th><th>نسبة التغطية</th><th>عدد التقارير</th>
+              </tr></thead>
+              <tbody id="hospitalCompareBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- آخر التقارير -->
+        <div class="table-wrapper">
+          <div class="table-header">
+            <span class="table-title"><i class="fas fa-clock" style="color:var(--secondary);margin-left:8px"></i>آخر التقارير المدخلة</span>
+          </div>
+          <div class="table-overflow">
+            <table class="data-table">
+              <thead><tr>
+                <th>التاريخ</th><th>المستشفى</th><th>القسم</th><th>الفترة</th>
+                <th>الحضور</th><th>الغياب</th><th>الانسحاب</th><th>مدخل البيانات</th><th>الحالة</th>
+              </tr></thead>
+              <tbody id="latestReportsBody"><tr><td colspan="9" class="empty-state"><i class="fas fa-inbox"></i><p>لا توجد تقارير بعد</p></td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== قسم التحليلات الذكية ===== -->
+      <div class="section-content" id="sec-analytics">
+        <div class="dashboard-header">
+          <h2><i class="fas fa-chart-line" style="color:var(--secondary);margin-left:8px"></i>التحليلات الذكية</h2>
+          <p>رؤى تلقائية حول اتجاهات الحضور، الغياب المتكرر، وفجوات التغطية</p>
+        </div>
+
+        <!-- فلتر التحليلات -->
+        <div class="filter-bar" style="margin-bottom:20px">
+          <div class="filter-group">
+            <label>المستشفى</label>
+            <select class="form-control" id="anaHospital" onchange="AdminApp.loadAnalytics()">
+              <option value="">الكل</option>
+              <option>مستشفى الطب النفسي</option>
+              <option>مستشفى النساء والأطفال</option>
+              <option>مستشفى المدينة الرئيسي</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>الفترة</label>
+            <select class="form-control" id="anaPeriod" onchange="AdminApp.loadAnalytics()">
+              <option value="">الكل</option>
+              <option>صباحي</option>
+              <option>مسائي</option>
+              <option>ليلي</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>من تاريخ</label>
+            <input type="date" class="form-control" id="anaDateFrom" onchange="AdminApp.loadAnalytics()">
+          </div>
+          <div class="filter-group">
+            <label>إلى تاريخ</label>
+            <input type="date" class="form-control" id="anaDateTo" onchange="AdminApp.loadAnalytics()">
+          </div>
+          <div class="filter-actions">
+            <button class="btn btn-outline btn-sm" onclick="AdminApp.resetAnaFilter()"><i class="fas fa-undo"></i> إعادة</button>
+          </div>
+        </div>
+
+        <!-- بطاقات مؤشرات سريعة -->
+        <div class="stat-cards" style="margin-bottom:20px">
+          <div class="stat-card blue">
+            <div class="stat-icon"><i class="fas fa-percentage"></i></div>
+            <div class="stat-info"><div class="stat-value" id="ana-rate">0%</div><div class="stat-label">معدل الحضور العام</div></div>
+          </div>
+          <div class="stat-card red">
+            <div class="stat-icon"><i class="fas fa-user-clock"></i></div>
+            <div class="stat-info"><div class="stat-value" id="ana-absenteeCount">0</div><div class="stat-label">أسماء متكررة الغياب</div></div>
+          </div>
+          <div class="stat-card orange">
+            <div class="stat-icon"><i class="fas fa-triangle-exclamation"></i></div>
+            <div class="stat-info"><div class="stat-value" id="ana-gapCount">0</div><div class="stat-label">جداول دوام ناقصة التغطية</div></div>
+          </div>
+        </div>
+
+        <!-- الرسوم البيانية -->
+        <div class="charts-row">
+          <div class="summary-box">
+            <div class="summary-title"><i class="fas fa-chart-area"></i> اتجاه الحضور والغياب عبر الزمن</div>
+            <div style="position:relative;height:260px"><canvas id="chartTrend"></canvas></div>
+          </div>
+          <div class="summary-box">
+            <div class="summary-title"><i class="fas fa-hospital"></i> مقارنة الحضور/الغياب بين المستشفيات</div>
+            <div style="position:relative;height:260px"><canvas id="chartHospitalCompare"></canvas></div>
+          </div>
+        </div>
+
+        <div class="charts-row">
+          <div class="summary-box">
+            <div class="summary-title"><i class="fas fa-chart-pie"></i> توزيع حالة التقارير</div>
+            <div style="position:relative;height:240px"><canvas id="chartStatusDist"></canvas></div>
+          </div>
+          <div class="summary-box">
+            <div class="summary-title"><i class="fas fa-user-clock"></i> الأكثر تكراراً في الغياب</div>
+            <div id="topAbsenteesList"></div>
+          </div>
+        </div>
+
+        <!-- تحليل فجوة التغطية -->
+        <div class="table-wrapper">
+          <div class="table-header">
+            <span class="table-title"><i class="fas fa-people-arrows" style="color:var(--secondary);margin-left:8px"></i>تحليل فجوة التغطية (المطلوب مقابل الفعلي)</span>
+          </div>
+          <div class="table-overflow">
+            <table class="data-table">
+              <thead><tr>
+                <th>المستشفى</th><th>القسم</th><th>الفترة</th><th>المطلوب</th><th>متوسط الحضور الفعلي</th><th>الفجوة</th><th>الحالة</th>
+              </tr></thead>
+              <tbody id="coverageGapBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== قسم الموظفين ===== -->
+      <div class="section-content" id="sec-employees">
+        <div class="table-wrapper">
+          <div class="table-header">
+            <span class="table-title"><i class="fas fa-id-card" style="color:var(--secondary);margin-left:8px"></i>أكواد الموظفين</span>
+            <div class="table-actions">
+              <input type="text" class="form-control" style="width:220px;height:38px" placeholder="بحث باسم أو كود..." id="empSearchInput" oninput="AdminApp.renderEmployees()">
+              <button class="btn btn-primary btn-sm" onclick="AdminApp.openEmpModal()">
+                <i class="fas fa-plus"></i> إضافة موظف
+              </button>
+            </div>
+          </div>
+          <div class="table-overflow">
+            <table class="data-table">
+              <thead><tr>
+                <th>#</th><th>اسم الموظف</th><th>الكود الخاص</th><th>المستشفى</th><th>تاريخ الإضافة</th><th>الإجراءات</th>
+              </tr></thead>
+              <tbody id="employeesBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== قسم جداول الدوام ===== -->
+      <div class="section-content" id="sec-shifts">
+        <div class="table-wrapper">
+          <div class="table-header">
+            <span class="table-title"><i class="fas fa-calendar-alt" style="color:var(--secondary);margin-left:8px"></i>جداول الدوام</span>
+            <div class="table-actions">
+              <button class="btn btn-primary btn-sm" onclick="AdminApp.openShiftModal()">
+                <i class="fas fa-plus"></i> إضافة جدول
+              </button>
+            </div>
+          </div>
+          <div class="table-overflow">
+            <table class="data-table">
+              <thead><tr>
+                <th>#</th><th>المستشفى</th><th>القسم</th><th>الفترة</th><th>الموظفين المطلوب</th><th>تاريخ الإضافة</th><th>الإجراءات</th>
+              </tr></thead>
+              <tbody id="shiftsBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== قسم الأقسام ===== -->
+      <div class="section-content" id="sec-departments">
+        <div class="table-wrapper">
+          <div class="table-header">
+            <span class="table-title"><i class="fas fa-sitemap" style="color:var(--secondary);margin-left:8px"></i>إدارة الأقسام</span>
+            <div class="table-actions">
+              <button class="btn btn-primary btn-sm" onclick="AdminApp.openDeptModal()">
+                <i class="fas fa-plus"></i> إضافة قسم
+              </button>
+            </div>
+          </div>
+          <div class="table-overflow">
+            <table class="data-table">
+              <thead><tr>
+                <th>#</th><th>اسم القسم</th><th>المستشفى</th><th>تاريخ الإضافة</th><th>الإجراءات</th>
+              </tr></thead>
+              <tbody id="deptsBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== قسم سجل التقارير ===== -->
+      <div class="section-content" id="sec-reports">
+        <div class="filter-bar">
+          <div class="filter-group">
+            <label>التاريخ</label>
+            <input type="date" class="form-control" id="repFilterDate">
+          </div>
+          <div class="filter-group">
+            <label>المستشفى</label>
+            <select class="form-control" id="repFilterHospital">
+              <option value="">الكل</option>
+              <option>مستشفى الطب النفسي</option>
+              <option>مستشفى النساء والأطفال</option>
+              <option>مستشفى المدينة الرئيسي</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>الفترة</label>
+            <select class="form-control" id="repFilterPeriod">
+              <option value="">الكل</option>
+              <option>صباحي</option><option>مسائي</option><option>ليلي</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>الحالة</label>
+            <select class="form-control" id="repFilterStatus">
+              <option value="">الكل</option>
+              <option value="pending">بانتظار الاعتماد</option>
+              <option value="approved">معتمد</option>
+              <option value="rejected">مرفوض</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>بحث</label>
+            <input type="text" class="form-control" id="repFilterSearch" placeholder="اسم موظف أو قسم...">
+          </div>
+          <div class="filter-actions">
+            <button class="btn btn-primary btn-sm" onclick="AdminApp.renderReports()"><i class="fas fa-search"></i> بحث</button>
+            <button class="btn btn-outline btn-sm" onclick="AdminApp.resetRepFilter()"><i class="fas fa-undo"></i></button>
+            <button class="btn btn-success btn-sm" onclick="AdminApp.exportReports('all')"><i class="fas fa-file-excel"></i> Excel</button>
+          </div>
+        </div>
+
+        <div class="table-wrapper">
+          <div class="table-header">
+            <span class="table-title"><i class="fas fa-clipboard-list" style="color:var(--secondary);margin-left:8px"></i>سجل التقارير</span>
+            <span id="reportsCount" style="font-size:13px;color:var(--text-muted)"></span>
+          </div>
+          <div class="table-overflow">
+            <table class="data-table">
+              <thead><tr>
+                <th>#</th><th>التاريخ</th><th>اليوم</th><th>المستشفى</th><th>القسم</th><th>الفترة</th>
+                <th>الإجمالي</th><th>حضور</th><th>غياب</th><th>انسحاب</th><th>إجازة</th>
+                <th>مدخل البيانات</th><th>الحالة</th><th>الإجراءات</th>
+              </tr></thead>
+              <tbody id="reportsBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== قسم التقرير اليومي ===== -->
+      <div class="section-content" id="sec-daily">
+        <div class="content-card">
+          <div class="content-card-header">
+            <span class="content-card-title"><i class="fas fa-calendar-day" style="color:var(--secondary)"></i> التقرير اليومي</span>
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <input type="date" class="form-control" id="dailyDate" style="width:auto" onchange="AdminApp.renderDailyReport()">
+              <button class="btn btn-success btn-sm" onclick="AdminApp.exportReports('daily')"><i class="fas fa-file-excel"></i> تصدير Excel</button>
+              <button class="btn btn-outline btn-sm" onclick="AdminApp.printReport('daily')"><i class="fas fa-print"></i> طباعة / PDF</button>
+            </div>
+          </div>
+          <div class="content-card-body" id="dailyReportBody"></div>
+        </div>
+      </div>
+
+      <!-- ===== قسم التقرير الأسبوعي ===== -->
+      <div class="section-content" id="sec-weekly">
+        <div class="content-card">
+          <div class="content-card-header">
+            <span class="content-card-title"><i class="fas fa-calendar-week" style="color:var(--secondary)"></i> التقرير الأسبوعي</span>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+              <div style="display:flex;align-items:center;gap:8px;font-size:14px">
+                <label>من:</label>
+                <input type="date" class="form-control" id="weeklyFrom" style="width:auto" onchange="AdminApp.renderWeeklyReport()">
+                <label>إلى:</label>
+                <input type="date" class="form-control" id="weeklyTo" style="width:auto" onchange="AdminApp.renderWeeklyReport()">
+              </div>
+              <button class="btn btn-success btn-sm" onclick="AdminApp.exportReports('weekly')"><i class="fas fa-file-excel"></i> تصدير Excel</button>
+              <button class="btn btn-outline btn-sm" onclick="AdminApp.printReport('weekly')"><i class="fas fa-print"></i> طباعة / PDF</button>
+            </div>
+          </div>
+          <div class="content-card-body" id="weeklyReportBody"></div>
+        </div>
+      </div>
+
+      <!-- ===== قسم التقرير الشهري ===== -->
+      <div class="section-content" id="sec-monthly">
+        <div class="content-card">
+          <div class="content-card-header">
+            <span class="content-card-title"><i class="fas fa-calendar" style="color:var(--secondary)"></i> التقرير الشهري</span>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+              <div style="display:flex;align-items:center;gap:8px;font-size:14px">
+                <label>الشهر:</label>
+                <input type="month" class="form-control" id="monthlyMonth" style="width:auto" onchange="AdminApp.renderMonthlyReport()">
+              </div>
+              <button class="btn btn-success btn-sm" onclick="AdminApp.exportReports('monthly')"><i class="fas fa-file-excel"></i> تصدير Excel</button>
+              <button class="btn btn-outline btn-sm" onclick="AdminApp.printReport('monthly')"><i class="fas fa-print"></i> طباعة / PDF</button>
+            </div>
+          </div>
+          <div class="content-card-body" id="monthlyReportBody"></div>
+        </div>
+      </div>
+
+      <!-- ===== قسم سجل التدقيق ===== -->
+      <div class="section-content" id="sec-audit">
+        <div class="table-wrapper">
+          <div class="table-header">
+            <span class="table-title"><i class="fas fa-clipboard-check" style="color:var(--secondary);margin-left:8px"></i>سجل التدقيق
+              <span id="auditCount" style="font-size:13px;color:var(--text-muted);font-weight:400"></span>
+            </span>
+            <div class="table-actions">
+              <input type="text" class="form-control" style="width:220px;height:38px" placeholder="بحث في الأحداث..." id="auditSearch" oninput="AdminApp.renderAudit()">
+              <button class="btn btn-success btn-sm" onclick="AdminApp.exportAudit()"><i class="fas fa-file-excel"></i> تصدير</button>
+              <button class="btn btn-danger btn-sm" onclick="AdminApp.clearAuditLog()"><i class="fas fa-trash"></i> مسح السجل</button>
+            </div>
+          </div>
+          <div class="table-overflow">
+            <table class="data-table">
+              <thead><tr>
+                <th>#</th><th>التاريخ والوقت</th><th>الحدث</th><th>التفاصيل</th>
+              </tr></thead>
+              <tbody id="auditBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== قسم الإعدادات ===== -->
+      <div class="section-content" id="sec-settings">
+
+        <!-- توقيع النائب الإداري -->
+        <div class="content-card" style="max-width:560px">
+          <div class="content-card-header">
+            <span class="content-card-title"><i class="fas fa-file-signature" style="color:var(--secondary)"></i> توقيع الاعتماد — النائب الإداري</span>
+          </div>
+          <div class="content-card-body">
+            <p style="font-size:13px;color:var(--text-light);margin-bottom:16px">
+              يُختم هذا الاسم والتوقيع تلقائياً على كل تقرير يتم اعتماده، ويظهر في نهاية التقارير المطبوعة.
+            </p>
+            <div class="form-row">
+              <div class="form-group">
+                <label>اسم النائب الإداري <span class="required">*</span></label>
+                <input type="text" class="form-control" id="deputyName" placeholder="الاسم الكامل">
+              </div>
+              <div class="form-group">
+                <label>المسمى الوظيفي</label>
+                <input type="text" class="form-control" id="deputyTitle" placeholder="النائب الإداري">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>التوقيع (ارسم داخل المربع بالفأرة أو الإصبع)</label>
+              <canvas id="sigCanvas" width="480" height="160" class="sig-canvas"></canvas>
+              <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+                <button class="btn btn-outline btn-sm" onclick="AdminApp.clearSignature()"><i class="fas fa-eraser"></i> مسح</button>
+                <div style="font-size:12px;color:var(--text-muted)">التوقيع المحفوظ حالياً:</div>
+                <div id="sigPreview"></div>
+              </div>
+            </div>
+            <button class="btn btn-primary" onclick="AdminApp.saveDeputyInfo()">
+              <i class="fas fa-save"></i> حفظ الاسم والتوقيع
+            </button>
+          </div>
+        </div>
+
+        <!-- النسخ الاحتياطي -->
+        <div class="content-card" style="max-width:560px;margin-top:20px">
+          <div class="content-card-header">
+            <span class="content-card-title"><i class="fas fa-database" style="color:var(--secondary)"></i> النسخ الاحتياطي والاستعادة</span>
+          </div>
+          <div class="content-card-body">
+            <p style="font-size:13px;color:var(--text-light);margin-bottom:16px">
+              البيانات محفوظة في هذا المتصفح فقط. نزّل نسخة احتياطية بشكل دوري، ويمكن استعادتها على أي جهاز آخر.
+            </p>
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <button class="btn btn-primary" onclick="AdminApp.backupData()">
+                <i class="fas fa-download"></i> تنزيل نسخة احتياطية
+              </button>
+              <button class="btn btn-outline" onclick="document.getElementById('restoreFile').click()">
+                <i class="fas fa-upload"></i> استعادة من ملف
+              </button>
+              <input type="file" id="restoreFile" accept="application/json,.json" style="display:none" onchange="AdminApp.restoreData(this)">
+            </div>
+          </div>
+        </div>
+
+        <div class="content-card" style="max-width:560px;margin-top:20px">
+          <div class="content-card-header">
+            <span class="content-card-title"><i class="fas fa-key" style="color:var(--secondary)"></i> تغيير كلمة المرور</span>
+          </div>
+          <div class="content-card-body">
+            <div class="form-group">
+              <label>كلمة المرور الحالية <span class="required">*</span></label>
+              <input type="password" class="form-control" id="settingsOldPass" placeholder="أدخل كلمة المرور الحالية">
+            </div>
+            <div class="form-group">
+              <label>كلمة المرور الجديدة <span class="required">*</span></label>
+              <input type="password" class="form-control" id="settingsNewPass" placeholder="كلمة مرور جديدة (6 أحرف على الأقل)">
+            </div>
+            <div class="form-group">
+              <label>تأكيد كلمة المرور <span class="required">*</span></label>
+              <input type="password" class="form-control" id="settingsConfPass" placeholder="أعد إدخال كلمة المرور الجديدة">
+            </div>
+            <button class="btn btn-primary" onclick="AdminApp.changePassword()">
+              <i class="fas fa-save"></i> حفظ التغييرات
+            </button>
+          </div>
+        </div>
+
+        <div class="content-card" style="max-width:480px;margin-top:20px">
+          <div class="content-card-header">
+            <span class="content-card-title"><i class="fas fa-trash-alt" style="color:var(--danger)"></i> إدارة البيانات</span>
+          </div>
+          <div class="content-card-body">
+            <p style="font-size:14px;color:var(--text-light);margin-bottom:16px">يمكنك حذف جميع بيانات التقارير مع الاحتفاظ بإعدادات الموظفين والأقسام.</p>
+            <button class="btn btn-danger btn-sm" onclick="AdminApp.clearReports()">
+              <i class="fas fa-trash"></i> حذف جميع التقارير
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /content-area -->
+  </main>
+</div><!-- /admin-layout -->
+
+<!-- ===== مودال الموظف ===== -->
+<div class="modal-overlay" id="empModal">
+  <div class="modal-box modal-sm">
+    <div class="modal-header">
+      <span class="modal-title" id="empModalTitle">إضافة موظف جديد</span>
+      <button class="modal-close" onclick="AdminApp.closeModal('empModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="empEditId">
+      <div class="form-group">
+        <label>اسم الموظف <span class="required">*</span></label>
+        <input type="text" class="form-control" id="empName" placeholder="أدخل الاسم الكامل">
+      </div>
+      <div class="form-group">
+        <label>الكود الخاص <span class="required">*</span></label>
+        <div style="display:flex;gap:8px">
+          <input type="text" class="form-control" id="empCode" placeholder="مثال: EMP001" style="direction:ltr">
+          <button class="btn btn-outline btn-sm" onclick="AdminApp.generateCode()" style="white-space:nowrap"><i class="fas fa-magic"></i> توليد</button>
+        </div>
+        <div class="form-hint">يجب أن يكون الكود فريداً لكل موظف</div>
+      </div>
+      <div class="form-group">
+        <label>المستشفى</label>
+        <select class="form-control" id="empHospital">
+          <option value="">-- اختر المستشفى --</option>
+          <option>مستشفى الطب النفسي</option>
+          <option>مستشفى النساء والأطفال</option>
+          <option>مستشفى المدينة الرئيسي</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="AdminApp.closeModal('empModal')">إلغاء</button>
+      <button class="btn btn-primary" onclick="AdminApp.saveEmployee()"><i class="fas fa-save"></i> حفظ</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== مودال جدول الدوام ===== -->
+<div class="modal-overlay" id="shiftModal">
+  <div class="modal-box modal-sm">
+    <div class="modal-header">
+      <span class="modal-title" id="shiftModalTitle">إضافة جدول دوام</span>
+      <button class="modal-close" onclick="AdminApp.closeModal('shiftModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="shiftEditId">
+      <div class="form-group">
+        <label>المستشفى <span class="required">*</span></label>
+        <select class="form-control" id="shiftHospital" onchange="AdminApp.loadDeptOptions('shiftDept','shiftHospital')">
+          <option value="">-- اختر المستشفى --</option>
+          <option>مستشفى الطب النفسي</option>
+          <option>مستشفى النساء والأطفال</option>
+          <option>مستشفى المدينة الرئيسي</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>القسم <span class="required">*</span></label>
+        <select class="form-control" id="shiftDept">
+          <option value="">-- اختر القسم --</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>الفترة <span class="required">*</span></label>
+        <select class="form-control" id="shiftPeriod">
+          <option value="">-- اختر الفترة --</option>
+          <option>صباحي</option><option>مسائي</option><option>ليلي</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>عدد الموظفين المطلوب <span class="required">*</span></label>
+        <input type="number" class="form-control" id="shiftCount" min="1" placeholder="0">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="AdminApp.closeModal('shiftModal')">إلغاء</button>
+      <button class="btn btn-primary" onclick="AdminApp.saveShift()"><i class="fas fa-save"></i> حفظ</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== مودال القسم ===== -->
+<div class="modal-overlay" id="deptModal">
+  <div class="modal-box modal-sm">
+    <div class="modal-header">
+      <span class="modal-title">إضافة قسم جديد</span>
+      <button class="modal-close" onclick="AdminApp.closeModal('deptModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>اسم القسم <span class="required">*</span></label>
+        <input type="text" class="form-control" id="deptName" placeholder="أدخل اسم القسم">
+      </div>
+      <div class="form-group">
+        <label>المستشفى <span class="required">*</span></label>
+        <select class="form-control" id="deptHospital">
+          <option value="">-- اختر المستشفى --</option>
+          <option>مستشفى الطب النفسي</option>
+          <option>مستشفى النساء والأطفال</option>
+          <option>مستشفى المدينة الرئيسي</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="AdminApp.closeModal('deptModal')">إلغاء</button>
+      <button class="btn btn-primary" onclick="AdminApp.saveDept()"><i class="fas fa-save"></i> حفظ</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== مودال رفض التقرير ===== -->
+<div class="modal-overlay" id="rejectModal">
+  <div class="modal-box modal-sm">
+    <div class="modal-header">
+      <span class="modal-title"><i class="fas fa-times-circle" style="color:var(--danger)"></i> رفض التقرير</span>
+      <button class="modal-close" onclick="AdminApp.closeModal('rejectModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="rejectReportId">
+      <div class="form-group">
+        <label>سبب الرفض <span class="required">*</span></label>
+        <textarea class="form-control" id="rejectReason" rows="4" placeholder="اكتب سبب رفض التقرير..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="AdminApp.closeModal('rejectModal')">إلغاء</button>
+      <button class="btn btn-danger" onclick="AdminApp.confirmReject()"><i class="fas fa-ban"></i> رفض التقرير</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== مودال تفاصيل التقرير ===== -->
+<div class="modal-overlay" id="reportDetailModal">
+  <div class="modal-box modal-lg">
+    <div class="modal-header">
+      <span class="modal-title"><i class="fas fa-file-alt" style="color:var(--secondary)"></i> تفاصيل التقرير</span>
+      <button class="modal-close" onclick="AdminApp.closeModal('reportDetailModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body" id="reportDetailBody"></div>
+  </div>
+</div>
+
+<!-- ===== مودال تأكيد الحذف ===== -->
+<div class="modal-overlay" id="confirmModal">
+  <div class="modal-box modal-sm">
+    <div class="modal-header">
+      <span class="modal-title"><i class="fas fa-exclamation-triangle" style="color:var(--danger)"></i> تأكيد الحذف</span>
+      <button class="modal-close" onclick="AdminApp.closeModal('confirmModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body">
+      <p id="confirmMsg" style="font-size:15px;color:var(--text)">هل أنت متأكد من الحذف؟</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="AdminApp.closeModal('confirmModal')">إلغاء</button>
+      <button class="btn btn-danger" id="confirmBtn"><i class="fas fa-trash"></i> حذف</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="script.js"></script>
+</body>
+</html>

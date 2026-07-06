@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>منصة مراقبة الدوام - مدينة الملك سلمان الطبية</title>
+  <meta name="theme-color" content="#1a3a5c">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+<body data-page="index">
+
+  <button class="btn btn-ghost btn-icon theme-toggle theme-toggle-float" title="الوضع الليلي / النهاري" onclick="Theme.toggle()">
+    <i class="fas fa-moon"></i>
+  </button>
+
+  <div class="index-page">
+    <div class="index-card">
+
+      <!-- الشعار والعنوان -->
+      <div class="index-logo">
+        <i class="fas fa-hospital-user"></i>
+      </div>
+      <h1 class="index-title">منصة مراقبة الدوام</h1>
+      <p class="index-subtitle">
+        مدينة الملك سلمان الطبية<br>
+        <small>نظام متابعة الحضور والجولات اليومية</small>
+      </p>
+
+      <!-- مؤشر الاتصال -->
+      <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:24px;font-size:13px;color:var(--text-light)">
+        <span class="pulse-dot"></span>
+        <span>النظام يعمل بشكل طبيعي</span>
+      </div>
+
+      <div class="index-divider"></div>
+
+      <!-- أزرار الدخول -->
+      <div class="index-buttons">
+
+        <button class="index-btn admin" onclick="location.href='admin.html'">
+          <div class="index-btn-icon">
+            <i class="fas fa-shield-halved"></i>
+          </div>
+          <div class="index-btn-text">
+            <strong>دخول المسؤول</strong>
+            <span>لوحة التحكم والإدارة الكاملة</span>
+          </div>
+          <i class="fas fa-arrow-left" style="margin-right:auto;opacity:.7"></i>
+        </button>
+
+        <button class="index-btn employee" onclick="location.href='employee.html'">
+          <div class="index-btn-icon">
+            <i class="fas fa-user-clock"></i>
+          </div>
+          <div class="index-btn-text">
+            <strong>دخول الموظف</strong>
+            <span>إدخال بيانات الدوام والجولات</span>
+          </div>
+          <i class="fas fa-arrow-left" style="margin-right:auto;opacity:.7"></i>
+        </button>
+
+      </div>
+
+      <!-- المستشفيات -->
+      <div class="index-divider"></div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;text-align:center;">
+        <div style="font-size:12px;color:var(--text-muted);padding:8px;">
+          <i class="fas fa-brain" style="color:var(--pending);display:block;font-size:18px;margin-bottom:4px;"></i>
+          مستشفى الطب النفسي
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);padding:8px;">
+          <i class="fas fa-baby" style="color:var(--secondary);display:block;font-size:18px;margin-bottom:4px;"></i>
+          النساء والأطفال
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);padding:8px;">
+          <i class="fas fa-hospital" style="color:var(--success);display:block;font-size:18px;margin-bottom:4px;"></i>
+          المستشفى الرئيسي
+        </div>
+      </div>
+
+      <div class="index-footer">
+        <p>&#169; 2024 مدينة الملك سلمان الطبية &nbsp;|&nbsp; جميع الحقوق محفوظة</p>
+        <p style="margin-top:4px">النسخة 1.0.0</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toastContainer"></div>
+  <script src="config.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
