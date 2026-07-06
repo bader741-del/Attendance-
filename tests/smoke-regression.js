@@ -36,6 +36,7 @@ async function testPage(file, checks) {
       if (d.querySelectorAll('.nav-item').length < 13) throw new Error('admin: nav items missing');
       if (!d.body.innerHTML.includes('hospital-map.html')) throw new Error('admin: map link missing');
       if (!d.body.innerHTML.includes('executive.html')) throw new Error('admin: executive link missing');
+      if (!d.body.innerHTML.includes('exec-reports.html')) throw new Error('admin: exec-reports link missing');
     });
     await testPage('employee.html', (w, d) => {
       if (!d.getElementById('empCodeInput') && !d.querySelector('input')) throw new Error('employee: code input missing');
