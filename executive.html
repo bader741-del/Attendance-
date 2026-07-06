@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>مركز القيادة التنفيذي - منصة مراقبة الدوام</title>
+  <meta name="theme-color" content="#1a3a5c">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="hospital-map.css">   <!-- مكوّنات مشتركة: شرائح الفلاتر وشارات الحالة -->
+  <link rel="stylesheet" href="executive.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+</head>
+<body data-page="executive">
+
+<!-- ===== بوابة دخول المسؤول (المكوّن المشترك AdminGate) ===== -->
+<div class="login-overlay" id="execLogin" style="display:none">
+  <div class="login-box">
+    <div class="login-icon"><i class="fas fa-chess-king"></i></div>
+    <h2 class="login-title">مركز القيادة التنفيذي</h2>
+    <p class="login-desc">أدخل كلمة مرور المسؤول للوصول إلى لوحة القيادة</p>
+    <div class="login-error" id="execLoginError">كلمة المرور غير صحيحة، حاول مجدداً</div>
+    <div class="form-group">
+      <label>كلمة المرور <span class="required">*</span></label>
+      <input type="password" id="execPassInput" class="form-control" placeholder="أدخل كلمة المرور" autocomplete="current-password">
+    </div>
+    <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:8px" onclick="ExecutiveApp.login()">
+      <i class="fas fa-sign-in-alt"></i> دخول
+    </button>
+    <div style="text-align:center;margin-top:14px">
+      <a href="index.html" style="font-size:13px;color:var(--text-light)"><i class="fas fa-arrow-right"></i> العودة للرئيسية</a>
+    </div>
+  </div>
+</div>
+
+<!-- ===== محتوى مركز القيادة ===== -->
+<div class="exec-page" id="execContent">
+
+  <!-- الشريط العلوي التنفيذي -->
+  <header class="exec-topbar">
+    <a href="admin.html" class="btn btn-ghost btn-icon" title="العودة للوحة المسؤول"><i class="fas fa-arrow-right"></i></a>
+    <div class="exec-title">
+      <i class="fas fa-chess-king"></i>
+      <div>
+        مركز القيادة التنفيذي
+        <small>مدينة الملك سلمان الطبية — متابعة لحظية</small>
+      </div>
+    </div>
+    <div class="exec-live">
+      <span class="pulse-dot"></span>
+      <span>بيانات حية · آخر تحديث <span id="execLastRefresh">—</span></span>
+    </div>
+    <div class="exec-export-bar">
+      <button class="btn btn-ghost btn-icon" title="تصدير Excel" onclick="ExecutiveApp.exportExcel()"><i class="fas fa-file-excel"></i></button>
+      <button class="btn btn-ghost btn-icon" title="تصدير PDF" onclick="ExecutiveApp.exportPDF()"><i class="fas fa-file-pdf"></i></button>
+      <button class="btn btn-ghost btn-icon" title="طباعة" onclick="ExecutiveApp.printPage()"><i class="fas fa-print"></i></button>
+    </div>
+    <button class="btn btn-ghost btn-icon" title="تحديث الآن" onclick="ExecutiveApp.refresh(false)"><i class="fas fa-rotate"></i></button>
+    <button class="btn btn-ghost btn-icon theme-toggle" title="الوضع الليلي / النهاري" onclick="Theme.toggle()"><i class="fas fa-moon"></i></button>
+    <button class="btn btn-ghost btn-icon" title="تسجيل الخروج" onclick="ExecutiveApp.logout()"><i class="fas fa-sign-out-alt"></i></button>
+  </header>
+
+  <div class="exec-body">
+
+    <!-- ترويسة الطباعة فقط -->
+    <div class="exec-print-header">
+      <h1>مركز القيادة التنفيذي — مدينة الملك سلمان الطبية</h1>
+      <p id="execPrintRange"></p>
+    </div>
+
+    <!-- الفلاتر السريعة (مكوّن الشرائح المشترك من hospital-map.css) -->
+    <div class="map-filters">
+      <i class="fas fa-filter" style="color:var(--secondary)"></i>
+      <button class="map-filter-chip active" data-preset="today"     onclick="ExecutiveApp.applyPreset('today')">اليوم</button>
+      <button class="map-filter-chip"        data-preset="yesterday" onclick="ExecutiveApp.applyPreset('yesterday')">أمس</button>
+      <button class="map-filter-chip"        data-preset="week"      onclick="ExecutiveApp.applyPreset('week')">الأسبوع</button>
+      <button class="map-filter-chip"        data-preset="month"     onclick="ExecutiveApp.applyPreset('month')">الشهر</button>
+      <button class="map-filter-chip"        data-preset="quarter"   onclick="ExecutiveApp.applyPreset('quarter')">الربع</button>
+      <button class="map-filter-chip"        data-preset="year"      onclick="ExecutiveApp.applyPreset('year')">السنة</button>
+      <button class="map-filter-chip"        data-preset="custom"    onclick="ExecutiveApp.applyPreset('custom')">نطاق مخصص</button>
+      <div class="map-custom-range" id="execCustomRange">
+        <input type="date" id="execFromDate" aria-label="من تاريخ">
+        <span style="color:var(--text-muted);font-size:13px">إلى</span>
+        <input type="date" id="execToDate" aria-label="إلى تاريخ">
+        <button class="btn btn-primary" style="padding:6px 14px;font-size:13px" onclick="ExecutiveApp.applyCustomRange()">تطبيق</button>
+      </div>
+      <span class="map-range-label" id="execRangeLabel"></span>
+    </div>
+
+    <!-- 1) المؤشرات التنفيذية -->
+    <div class="exec-section-title"><i class="fas fa-gauge-high"></i> المؤشرات التنفيذية <span class="hint">(الفترة المحددة)</span></div>
+    <div class="exec-kpi-grid" id="execKpiGrid"></div>
+
+    <!-- 2) التنبيهات الآلية -->
+    <div class="exec-section-title"><i class="fas fa-bell"></i> التنبيهات الآلية</div>
+    <div class="exec-alerts" id="execAlerts"></div>
+
+    <!-- 3) مقارنة المستشفيات -->
+    <div class="exec-panel">
+      <div class="exec-panel-title"><i class="fas fa-scale-balanced"></i> مقارنة المستشفيات الثلاثة</div>
+      <div class="hosp-table-wrap">
+        <table class="data-table exec-compare-table">
+          <thead>
+            <tr><th>المستشفى</th><th>نسبة الحضور</th><th>نسبة الالتزام</th><th>تقارير ناقصة</th><th>عدد الموظفين</th><th>الحالة</th></tr>
+          </thead>
+          <tbody id="execCompareBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 4) اتجاه الحضور + المقارنة الأسبوعية -->
+    <div class="exec-charts-2">
+      <div class="exec-panel">
+        <div class="exec-panel-title"><i class="fas fa-chart-area"></i> اتجاه الحضور والغياب</div>
+        <div class="exec-chart-canvas"><canvas id="execChartTrend"></canvas></div>
+      </div>
+      <div class="exec-panel">
+        <div class="exec-panel-title"><i class="fas fa-calendar-week"></i> مقارنة أسبوعية (الحالي مقابل الماضي)</div>
+        <div class="exec-chart-canvas"><canvas id="execChartWeekly"></canvas></div>
+      </div>
+    </div>
+
+    <!-- 5) المقارنة الشهرية + ترتيب المستشفيات -->
+    <div class="exec-charts-2">
+      <div class="exec-panel">
+        <div class="exec-panel-title"><i class="fas fa-calendar"></i> مقارنة شهرية (آخر 6 أشهر)</div>
+        <div class="exec-chart-canvas"><canvas id="execChartMonthly"></canvas></div>
+      </div>
+      <div class="exec-panel">
+        <div class="exec-panel-title"><i class="fas fa-ranking-star"></i> ترتيب المستشفيات</div>
+        <div class="exec-chart-canvas"><canvas id="execChartHospRank"></canvas></div>
+      </div>
+    </div>
+
+    <!-- 6) ترتيب الأقسام + تقدم المؤشرات -->
+    <div class="exec-charts-2">
+      <div class="exec-panel">
+        <div class="exec-panel-title"><i class="fas fa-sitemap"></i> ترتيب الأقسام (أفضل 10)</div>
+        <div class="exec-chart-canvas"><canvas id="execChartDeptRank"></canvas></div>
+      </div>
+      <div class="exec-panel">
+        <div class="exec-panel-title"><i class="fas fa-bullseye"></i> تقدم مؤشرات الأداء</div>
+        <div class="exec-charts-3">
+          <div style="text-align:center">
+            <div class="exec-chart-canvas sm" style="height:130px"><canvas id="execGaugeAttendance"></canvas></div>
+            <b id="execGaugeAttendanceVal" style="font-size:18px">—</b>
+            <div style="font-size:12px;color:var(--text-muted)">الحضور</div>
+          </div>
+          <div style="text-align:center">
+            <div class="exec-chart-canvas sm" style="height:130px"><canvas id="execGaugeCompliance"></canvas></div>
+            <b id="execGaugeComplianceVal" style="font-size:18px">—</b>
+            <div style="font-size:12px;color:var(--text-muted)">الالتزام</div>
+          </div>
+          <div style="text-align:center">
+            <div class="exec-chart-canvas sm" style="height:130px"><canvas id="execGaugeApproval"></canvas></div>
+            <b id="execGaugeApprovalVal" style="font-size:18px">—</b>
+            <div style="font-size:12px;color:var(--text-muted)">الاعتماد</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7) الخريطة الحرارية -->
+    <div class="exec-panel">
+      <div class="exec-panel-title"><i class="fas fa-table-cells"></i> الخريطة الحرارية للحضور (المستشفيات × الأيام)</div>
+      <div class="exec-heatmap-wrap" id="execHeatmap"></div>
+      <div class="exec-heatmap-legend">
+        <span class="lg"><span class="sw" style="background:var(--success)"></span> ممتاز ≥95%</span>
+        <span class="lg"><span class="sw" style="background:var(--warning)"></span> متابعة 85–94%</span>
+        <span class="lg"><span class="sw" style="background:var(--danger)"></span> حرج &lt;85%</span>
+        <span class="lg"><span class="sw" style="background:var(--surface-2);border:1px solid var(--border)"></span> لا بيانات</span>
+      </div>
+    </div>
+
+    <!-- 8) الأفضل أداءً -->
+    <div class="exec-section-title"><i class="fas fa-award"></i> الأفضل أداءً</div>
+    <div class="exec-top-grid" id="execTopGrid"></div>
+
+    <!-- 9) الرؤى الذكية -->
+    <div class="exec-section-title"><i class="fas fa-lightbulb"></i> رؤى إدارية آلية</div>
+    <div class="exec-insights" id="execInsights"></div>
+
+  </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- الترتيب مهم: Supabase ← الإعدادات ← الطبقات المشتركة ← وحدة المركز -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="script.js"></script>
+<script src="analytics-core.js"></script>
+<script src="executive.js"></script>
+</body>
+</html>
