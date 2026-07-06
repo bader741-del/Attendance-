@@ -2,12 +2,11 @@
    خريطة عمليات المستشفيات — الوحدة البرمجية (المرحلة 5)
    hospital-map.js
    ------------------------------------------------------------
-   وحدة مستقلة تُحمَّل بعد script.js وتعيد استخدام طبقاته القائمة
-   دون أي تعديل عليها:
-     - DB    : القراءة المحلية (ذاكرة العمل)
-     - Cloud : عميل Supabase
-     - Sync  : السحب من السحابة (Supabase مصدر الحقيقة)
-     - Theme / Toast / esc : السمة والتنبيهات والتهريب
+   وحدة مستقلة تُحمَّل بعد script.js وanalytics-core.js وتعيد
+   استخدام الطبقات القائمة دون أي تعديل عليها:
+     - DB / Cloud / Sync          : البيانات (Supabase مصدر الحقيقة)
+     - Theme / Toast / esc        : السمة والتنبيهات والتهريب
+     - Analytics / AdminGate      : الحسابات والبوابة المشتركة
    كل الأرقام تُحسب آلياً من التقارير الفعلية — لا بيانات ثابتة.
    ============================================================ */
 
@@ -15,19 +14,9 @@
 
 const HospitalMap = {
 
-  /* ======================================================
-     الإعدادات الثابتة للعرض فقط (أيقونة/لون/إحداثيات)
-     الإحداثيات تقريبية لمجمع مدينة الملك سلمان الطبية
-     بالمدينة المنورة — عدّلها هنا عند توفر إحداثيات أدق.
-     ====================================================== */
-  META: {
-    'مستشفى المدينة الرئيسي':  { icon: 'fa-hospital', color: '#2980b9', en: 'Main Hospital',                coords: [24.4861, 39.5799] },
-    'مستشفى النساء والأطفال': { icon: 'fa-baby',     color: '#8e44ad', en: 'Maternity & Children Hospital', coords: [24.4838, 39.5758] },
-    'مستشفى الطب النفسي':     { icon: 'fa-brain',    color: '#16a085', en: 'Mental Health Hospital',        coords: [24.4895, 39.5846] },
-  },
-
-  /* حدود ألوان الحالة: أخضر ≥95، أصفر 85–94، أحمر <85 */
-  THRESHOLDS: { green: 95, yellow: 85 },
+  /* بيانات العرض (أيقونة/لون/إحداثيات) — مُوحَّدة في الطبقة المشتركة */
+  get META()       { return Analytics.HOSPITAL_META; },
+  get THRESHOLDS() { return Analytics.THRESHOLDS; },
 
   /* حالة الوحدة */
   range: { from: null, to: null },   // نطاق التاريخ الحالي
@@ -41,61 +30,14 @@ const HospitalMap = {
   _rtChannel: null,
 
   /* ======================================================
-     1) التهيئة وبوابة الدخول
-     نفس منطق لوحة المسؤول: مصادقة Supabase عند تفعيل السحابة،
-     وإلا كلمة المرور المحلية. (بيانات التقارير محمية بـ RLS
-     للمسؤول فقط، لذا الصفحة خلف بوابة دخول المسؤول)
+     1) التهيئة وبوابة الدخول — عبر AdminGate المشترك
+     (بيانات التقارير محمية بـ RLS للمسؤول فقط)
      ====================================================== */
-  init() {
-    if (DB.isAdminLoggedIn()) { this._showApp(); return; }
+  _gateIds: { overlay: 'mapLogin', input: 'mapPassInput', error: 'mapLoginError' },
 
-    document.getElementById('mapLogin').style.display = 'flex';
-    const inp = document.getElementById('mapPassInput');
-    if (inp) inp.addEventListener('keydown', e => { if (e.key === 'Enter') this.login(); });
-
-    // استعادة جلسة سحابية سابقة إن وُجدت (كما في لوحة المسؤول)
-    if (Cloud.on()) {
-      Cloud.sb.auth.getSession().then(({ data }) => {
-        if (data?.session) { DB.setAdminSession(); this._showApp(); }
-      }).catch(() => {});
-    }
-  },
-
-  async login() {
-    const inp = document.getElementById('mapPassInput');
-    const err = document.getElementById('mapLoginError');
-    if (!inp || !err) return;
-
-    let ok;
-    if (Cloud.on()) {
-      try {
-        const { error } = await Cloud.sb.auth.signInWithPassword({
-          email: SUPABASE_CONFIG.adminEmail,
-          password: inp.value,
-        });
-        ok = !error;
-      } catch { ok = false; }
-    } else {
-      ok = await DB.verifyPass(inp.value);
-    }
-
-    if (ok) {
-      DB.setAdminSession();
-      DB.audit('تسجيل دخول المسؤول', 'دخول عبر خريطة العمليات');
-      err.classList.remove('show');
-      this._showApp();
-    } else {
-      err.classList.add('show');
-      inp.value = '';
-      inp.focus();
-    }
-  },
-
-  logout() {
-    const bye = () => { DB.clearAdminSession(); location.href = 'index.html'; };
-    if (Cloud.on()) Cloud.sb.auth.signOut().then(bye).catch(bye);
-    else bye();
-  },
+  init()   { AdminGate.init(this._gateIds, () => this._showApp()); },
+  login()  { AdminGate.login(this._gateIds, () => this._showApp()); },
+  logout() { AdminGate.logout(); },
 
   async _showApp() {
     document.getElementById('mapLogin').style.display = 'none';
@@ -113,9 +55,7 @@ const HospitalMap = {
      العمل المحلية؛ بعدها تُحسب كل الأرقام من البيانات الحية.
      ====================================================== */
   async refresh(silent = true) {
-    if (Cloud.on()) {
-      try { await Sync.pullAll(); } catch { /* دون اتصال — آخر نسخة معروفة */ }
-    }
+    await Analytics.pull();   // سحب أحدث البيانات من Supabase
     this.renderAll();
     const stamp = document.getElementById('mapLastRefresh');
     if (stamp) stamp.textContent = new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' });
@@ -123,41 +63,12 @@ const HospitalMap = {
   },
 
   /* ======================================================
-     3) التحديث التلقائي عند وصول بيانات جديدة
-     - سحابة: قناة Realtime على جدول reports (أي إدراج/تعديل)
-     - محلي : حدث storage (إدخال موظف من تبويب آخر)
-     - شبكة أمان: سحب دوري كل 60 ثانية + تحديث عند العودة للتبويب
+     3) التحديث التلقائي — عبر Analytics.autoRefresh المشترك
+     (Realtime سحابياً + storage محلياً + سحب دوري احتياطي)
      ====================================================== */
   _initAutoRefresh() {
-    // قناة Supabase Realtime
-    if (Cloud.on() && !this._rtChannel) {
-      try {
-        this._rtChannel = Cloud.sb
-          .channel('hospital-map-reports')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' },
-              () => this._debouncedRefresh())
-          .subscribe();
-      } catch { /* Realtime غير مفعّل — يكفي السحب الدوري */ }
-    }
-
-    // الوضع المحلي: تقرير جديد كُتب في localStorage من تبويب آخر
-    window.addEventListener('storage', e => {
-      if (e.key === DB._k.reports) this._debouncedRefresh();
-    });
-
-    // العودة إلى التبويب
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) this.refresh();
-    });
-
-    // سحب دوري احتياطي
-    if (!this._pollTimer) this._pollTimer = setInterval(() => this.refresh(), 60000);
-  },
-
-  _debounce: null,
-  _debouncedRefresh() {
-    clearTimeout(this._debounce);
-    this._debounce = setTimeout(() => this.refresh(), 800);
+    if (!this._pollTimer)
+      this._pollTimer = Analytics.autoRefresh('hospital-map-reports', () => this.refresh());
   },
 
   /* ======================================================
@@ -166,22 +77,8 @@ const HospitalMap = {
      ====================================================== */
   applyPreset(preset, rerender = true) {
     this.preset = preset;
-    const t = new Date();
-    const iso = d => DB.localISO(d);
-
-    if (preset === 'today') {
-      this.range = { from: DB.today(), to: DB.today() };
-    } else if (preset === 'yesterday') {
-      const y = new Date(t); y.setDate(t.getDate() - 1);
-      this.range = { from: iso(y), to: iso(y) };
-    } else if (preset === 'week') {
-      this.range = DB.weekRange();
-    } else if (preset === 'month') {
-      const first = new Date(t.getFullYear(), t.getMonth(), 1);
-      const last  = new Date(t.getFullYear(), t.getMonth() + 1, 0);
-      this.range = { from: iso(first), to: iso(last) };
-    }
-    // preset === 'custom' : يبقى النطاق كما اختاره المستخدم
+    // النطاق من الطبقة المشتركة — 'custom' يبقى كما اختاره المستخدم
+    if (preset !== 'custom') this.range = Analytics.rangeFor(preset);
 
     // تفعيل الشريحة النشطة وإظهار حقول النطاق المخصص
     document.querySelectorAll('.map-filter-chip').forEach(c =>
@@ -213,33 +110,15 @@ const HospitalMap = {
   },
 
   /* ======================================================
-     5) الحسابات — كلها آلية من التقارير الفعلية
+     5) الحسابات — مفوَّضة للطبقة المشتركة (Analytics)
      التقارير المرفوضة تُستبعد من الإحصاء (كما في بقية المنصة)
      ====================================================== */
   _reports(hospital = null, from = this.range.from, to = this.range.to) {
-    let list = DB.getReports().filter(r =>
-      r.date >= from && r.date <= to && r.status !== 'rejected');
-    if (hospital) list = list.filter(r => r.hospital === hospital);
-    return list;
+    return Analytics.reports({ from, to, hospital });
   },
 
-  /* إحصائية مجمّعة لمجموعة تقارير */
-  _stats(reports) {
-    const t = reports.reduce((a, r) => {
-      a.present   += +r.present   || 0;
-      a.absent    += +r.absent    || 0;
-      a.withdrawn += +r.withdrawn || 0;
-      a.leave     += +r.leave     || 0;
-      return a;
-    }, { present: 0, absent: 0, withdrawn: 0, leave: 0 });
-    const denom = t.present + t.absent + t.withdrawn + t.leave;
-    return {
-      ...t,
-      denom,
-      rate: denom ? (t.present / denom) * 100 : null,   // null = لا بيانات
-      count: reports.length,
-    };
-  },
+  _stats(reports)  { return Analytics.sumStats(reports); },
+  _statusOf(rate)  { return Analytics.statusOf(rate); },
 
   /* بيانات بطاقة مستشفى واحد */
   _hospitalData(h) {
@@ -257,14 +136,6 @@ const HospitalMap = {
       lastSubmit: last,
       status: this._statusOf(stats.rate),
     };
-  },
-
-  /* تصنيف الحالة اللونية حسب نسبة الحضور */
-  _statusOf(rate) {
-    if (rate === null)                  return { cls: 'status-none',   label: 'لا توجد بيانات', emoji: '⚪' };
-    if (rate >= this.THRESHOLDS.green)  return { cls: 'status-green',  label: 'ممتاز',          emoji: '🟢' };
-    if (rate >= this.THRESHOLDS.yellow) return { cls: 'status-yellow', label: 'يحتاج متابعة',   emoji: '🟡' };
-    return                                     { cls: 'status-red',    label: 'حرج',            emoji: '🔴' };
   },
 
   _fmtDateTime(iso) {
@@ -466,25 +337,13 @@ const HospitalMap = {
     }).join('');
   },
 
-  /* ---- رسم Chart.js مع تدمير النسخة السابقة ---- */
-  _chart(id, config) {
-    const cv = document.getElementById(id);
-    if (!cv || typeof Chart === 'undefined') return;
-    if (this._charts[id]) this._charts[id].destroy();
-    const muted = getComputedStyle(document.documentElement).getPropertyValue('--text-light').trim();
-    Chart.defaults.color = muted;
-    Chart.defaults.font.family = 'Cairo, sans-serif';
-    this._charts[id] = new Chart(cv.getContext('2d'), config);
-  },
+  /* ---- رسم Chart.js — عبر المساعد المشترك ---- */
+  _chart(id, config) { Analytics.chart(this._charts, id, config); },
 
   /* ---- اتجاه الحضور عبر أيام الفترة (خطي) ---- */
   _renderTrendChart(h) {
     // أيام النطاق (بحد أقصى 62 يوماً حمايةً للأداء)
-    const days = [];
-    const d = new Date(this.range.from + 'T00:00:00');
-    const end = new Date(this.range.to + 'T00:00:00');
-    while (d <= end && days.length < 62) { days.push(DB.localISO(d)); d.setDate(d.getDate() + 1); }
-
+    const days = Analytics.days(this.range.from, this.range.to, 62);
     const reps = this._reports(h);
     const per = days.map(day => this._stats(reps.filter(r => r.date === day)));
 
@@ -570,11 +429,7 @@ const HospitalMap = {
       ? DB.weekRange()
       : { from: DB.thisMonth() + '-01', to: DB.localISO(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0)) };
 
-    const days = [];
-    const d = new Date(range.from + 'T00:00:00');
-    const end = new Date(range.to + 'T00:00:00');
-    while (d <= end && days.length < 62) { days.push(DB.localISO(d)); d.setDate(d.getDate() + 1); }
-
+    const days = Analytics.days(range.from, range.to, 62);
     const reps = this._reports(h, range.from, range.to);
     head.innerHTML = `<tr><th>التاريخ</th><th>تقارير</th><th>حاضر</th><th>غائب</th><th>إجازة</th><th>منسحب</th><th>نسبة الحضور</th><th>الحالة</th></tr>`;
     const rows = days.map(day => {
