@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>التقارير التنفيذية - منصة مراقبة الدوام</title>
+  <meta name="theme-color" content="#1a3a5c">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="hospital-map.css">   <!-- مكوّنات مشتركة -->
+  <link rel="stylesheet" href="executive.css">      <!-- لوحات وشارات مشتركة -->
+  <link rel="stylesheet" href="exec-reports.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+</head>
+<body data-page="exec-reports">
+
+<!-- ===== بوابة دخول المسؤول (المكوّن المشترك AdminGate) ===== -->
+<div class="login-overlay" id="rptLogin" style="display:none">
+  <div class="login-box">
+    <div class="login-icon"><i class="fas fa-file-contract"></i></div>
+    <h2 class="login-title">التقارير التنفيذية</h2>
+    <p class="login-desc">أدخل كلمة مرور المسؤول للوصول إلى نظام التقارير</p>
+    <div class="login-error" id="rptLoginError">كلمة المرور غير صحيحة، حاول مجدداً</div>
+    <div class="form-group">
+      <label>كلمة المرور <span class="required">*</span></label>
+      <input type="password" id="rptPassInput" class="form-control" placeholder="أدخل كلمة المرور" autocomplete="current-password">
+    </div>
+    <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:8px" onclick="ExecReports.login()">
+      <i class="fas fa-sign-in-alt"></i> دخول
+    </button>
+    <div style="text-align:center;margin-top:14px">
+      <a href="index.html" style="font-size:13px;color:var(--text-light)"><i class="fas fa-arrow-right"></i> العودة للرئيسية</a>
+    </div>
+  </div>
+</div>
+
+<!-- ===== محتوى الصفحة ===== -->
+<div class="rpt-page" id="rptContent">
+
+  <!-- الشريط العلوي (نمط خريطة العمليات المشترك) -->
+  <header class="map-topbar rpt-topbar">
+    <a href="admin.html" class="btn btn-ghost btn-icon" title="العودة للوحة المسؤول"><i class="fas fa-arrow-right"></i></a>
+    <div class="map-topbar-title">
+      <i class="fas fa-file-contract"></i>
+      <span>التقارير التنفيذية</span>
+    </div>
+    <div class="map-live">
+      <span class="pulse-dot"></span>
+      <span>يقرأ مباشرة من قاعدة البيانات</span>
+    </div>
+    <a href="executive.html" class="btn btn-ghost btn-icon" title="مركز القيادة التنفيذي"><i class="fas fa-chess-king"></i></a>
+    <a href="hospital-map.html" class="btn btn-ghost btn-icon" title="خريطة العمليات"><i class="fas fa-map-location-dot"></i></a>
+    <button class="btn btn-ghost btn-icon theme-toggle" title="الوضع الليلي / النهاري" onclick="Theme.toggle()"><i class="fas fa-moon"></i></button>
+    <button class="btn btn-ghost btn-icon" title="تسجيل الخروج" onclick="ExecReports.logout()"><i class="fas fa-sign-out-alt"></i></button>
+  </header>
+
+  <div class="rpt-body">
+
+    <!-- ===== مُنشئ التقرير ===== -->
+    <div class="rpt-builder">
+      <div class="exec-panel-title" style="margin-bottom:14px"><i class="fas fa-sliders"></i> إعداد التقرير</div>
+
+      <div class="rpt-builder-grid">
+        <div class="rpt-field">
+          <label>نوع التقرير</label>
+          <select id="rptType" onchange="ExecReports._onTypeChange()">
+            <option value="daily">يومي</option>
+            <option value="weekly">أسبوعي</option>
+            <option value="monthly">شهري</option>
+            <option value="quarterly">ربع سنوي</option>
+            <option value="annual">سنوي</option>
+            <option value="custom">فترة مخصصة</option>
+          </select>
+        </div>
+        <div class="rpt-field" id="rptDateField">
+          <label>التاريخ (أي يوم ضمن الفترة)</label>
+          <input type="date" id="rptDate">
+        </div>
+        <div class="rpt-field" id="rptMonthField" style="display:none">
+          <label>الشهر</label>
+          <input type="month" id="rptMonth">
+        </div>
+        <div class="rpt-field" id="rptYearField" style="display:none">
+          <label>السنة</label>
+          <input type="number" id="rptYear" min="2020" max="2100" step="1">
+        </div>
+        <div class="rpt-field" id="rptFromField" style="display:none">
+          <label>من تاريخ</label>
+          <input type="date" id="rptFrom">
+        </div>
+        <div class="rpt-field" id="rptToField" style="display:none">
+          <label>إلى تاريخ</label>
+          <input type="date" id="rptTo">
+        </div>
+        <div class="rpt-field">
+          <label>المستشفى</label>
+          <select id="rptHospital" onchange="ExecReports._populateDepts()"></select>
+        </div>
+        <div class="rpt-field">
+          <label>القسم</label>
+          <select id="rptDept"></select>
+        </div>
+        <div class="rpt-field">
+          <label>الموظف (مُدخل البيانات)</label>
+          <select id="rptEmployee"></select>
+        </div>
+        <div class="rpt-field">
+          <label>حالة التقارير</label>
+          <select id="rptStatus">
+            <option value="">الكل (عدا المرفوضة)</option>
+            <option value="approved">المعتمدة فقط</option>
+            <option value="pending">المعلقة فقط</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="rpt-builder-actions">
+        <button class="btn btn-primary" onclick="ExecReports.generate()"><i class="fas fa-wand-magic-sparkles"></i> توليد التقرير</button>
+        <button class="btn btn-ghost" onclick="ExecReports.exportPDF()"><i class="fas fa-file-pdf" style="color:var(--danger)"></i> PDF</button>
+        <button class="btn btn-ghost" onclick="ExecReports.exportExcel()"><i class="fas fa-file-excel" style="color:var(--success)"></i> Excel</button>
+        <button class="btn btn-ghost" onclick="ExecReports.printReport()"><i class="fas fa-print"></i> طباعة</button>
+        <div class="rpt-toggles">
+          <label><input type="checkbox" id="rptIncLeave" checked> تضمين الإجازات</label>
+          <label><input type="checkbox" id="rptIncWithdrawn" checked> تضمين الانسحابات</label>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== معاينة التقرير ===== -->
+    <div class="rpt-preview-wrap" id="rptPreviewWrap">
+      <div class="rpt-doc" id="rptDoc"><!-- يُبنى من exec-reports.js --></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- تذييل الطباعة (يتكرر على كل صفحة مطبوعة) -->
+<div class="rpt-print-footer">
+  <span>منصة مراقبة الدوام — مدينة الملك سلمان الطبية</span>
+  <span id="rptPrintFooterText"></span>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- الترتيب مهم: Supabase ← الإعدادات ← الطبقات المشتركة ← وحدة التقارير -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="script.js"></script>
+<script src="analytics-core.js"></script>
+<script src="exec-reports.js"></script>
+</body>
+</html>
