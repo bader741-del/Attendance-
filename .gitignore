@@ -2,3 +2,6 @@
 *.zip
 ziAb5BPV
 ٠٠منصة_مراقبة_الدوام/
+tests/node_modules/
+tests/package-lock.json
+tests/package.json
