@@ -335,6 +335,19 @@
 
 .hosp-table-wrap { overflow-x: auto; }
 
+/* صفوف ترتيب الأقسام (الأفضل أداءً / الأكثر غياباً) */
+.hosp-rank-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px;
+  border-bottom: 1px dashed var(--border-light);
+  font-size: 13px;
+}
+.hosp-rank-row:last-child { border-bottom: none; }
+.hosp-rank-name { color: var(--text); font-weight: 600; }
+.hosp-rank-val  { margin-right: auto; font-weight: 800; }
+
 /* ======== تجاوب الجوال ======== */
 @media (max-width: 768px) {
   .map-body { padding: 12px; gap: 12px; }

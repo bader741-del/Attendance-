@@ -302,9 +302,45 @@ const HospitalMap = {
       <div class="hosp-stat c-pending"><b>${d.pending}</b><span>بانتظار الاعتماد</span></div>`;
 
     this._renderDeptTable(h);
+    this._renderDeptHighlights(h);
     this._renderTrendChart(h);
     this._renderDeptChart(h);
     this.showTab(this.currentTab || 'daily');
+  },
+
+  /* ---- ترتيب الأقسام: الأفضل أداءً / الأكثر غياباً ---- */
+  _renderDeptHighlights(h) {
+    const best = document.getElementById('hospBestDepts');
+    const worst = document.getElementById('hospAbsentDepts');
+    if (!best || !worst) return;
+
+    const reps = this._reports(h);
+    const stats = [...new Set(reps.map(r => r.department))].filter(Boolean).map(dept => ({
+      dept,
+      s: this._stats(reps.filter(r => r.department === dept)),
+    })).filter(x => x.s.rate !== null);
+
+    const row = (x, val, color, icon) => `
+      <div class="hosp-rank-row">
+        <i class="fas ${icon}" style="color:${color}"></i>
+        <span class="hosp-rank-name">${esc(x.dept)}</span>
+        <span class="hosp-rank-val" style="color:${color}">${val}</span>
+      </div>`;
+    const empty = `<div style="font-size:12px;color:var(--text-muted);padding:8px 2px">لا توجد بيانات في الفترة</div>`;
+
+    // الأفضل أداءً: أعلى نسبة حضور (أفضل 3)
+    const top = [...stats].sort((a, b) => b.s.rate - a.s.rate).slice(0, 3);
+    best.innerHTML = top.length
+      ? top.map((x, i) => row(x, Math.round(x.s.rate) + '%', 'var(--success)',
+          i === 0 ? 'fa-trophy' : i === 1 ? 'fa-medal' : 'fa-award')).join('')
+      : empty;
+
+    // الأكثر غياباً: أعلى نسبة غياب (أعلى 3، غياب > 0)
+    const abs = [...stats].filter(x => x.s.absent > 0)
+      .sort((a, b) => b.s.absenceRate - a.s.absenceRate).slice(0, 3);
+    worst.innerHTML = abs.length
+      ? abs.map(x => row(x, Math.round(x.s.absenceRate) + '%', 'var(--danger)', 'fa-user-xmark')).join('')
+      : empty;
   },
 
   /* ---- جدول إحصائيات الأقسام ---- */

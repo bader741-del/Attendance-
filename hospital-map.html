@@ -50,6 +50,7 @@
       <span class="pulse-dot"></span>
       <span>بيانات حية · آخر تحديث <span id="mapLastRefresh">—</span></span>
     </div>
+    <a href="executive.html" class="btn btn-ghost btn-icon" title="مركز القيادة التنفيذي"><i class="fas fa-chess-king"></i></a>
     <button class="btn btn-ghost btn-icon" title="تحديث الآن" onclick="HospitalMap.refresh(false)"><i class="fas fa-rotate"></i></button>
     <button class="btn btn-ghost btn-icon theme-toggle" title="الوضع الليلي / النهاري" onclick="Theme.toggle()"><i class="fas fa-moon"></i></button>
     <button class="btn btn-ghost btn-icon" title="تسجيل الخروج" onclick="HospitalMap.logout()"><i class="fas fa-sign-out-alt"></i></button>
@@ -124,6 +125,18 @@
             </thead>
             <tbody id="hospDeptBody"></tbody>
           </table>
+        </div>
+      </div>
+
+      <!-- ترتيب الأقسام: الأفضل أداءً / الأكثر غياباً -->
+      <div class="hosp-detail-charts">
+        <div class="hosp-chart-box">
+          <div class="hosp-chart-title"><i class="fas fa-trophy" style="color:var(--success)"></i> الأقسام الأفضل أداءً</div>
+          <div id="hospBestDepts"></div>
+        </div>
+        <div class="hosp-chart-box">
+          <div class="hosp-chart-title"><i class="fas fa-user-xmark" style="color:var(--danger)"></i> الأقسام الأكثر غياباً</div>
+          <div id="hospAbsentDepts"></div>
         </div>
       </div>
 
