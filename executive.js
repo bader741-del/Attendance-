@@ -85,54 +85,10 @@ const ExecutiveApp = {
   },
 
   /* ======================================================
-     3) السياق (ctx) — كل الحسابات مرة واحدة لكل دورة عرض
+     3) السياق (ctx) — النظرة الشاملة من الطبقة المشتركة
+     (تُحسب مرة واحدة لكل دورة عرض وتغذي كل اللوحات)
      ====================================================== */
-  _buildContext() {
-    const { from, to } = this.range;
-    const prev = Analytics.prevRange(from, to);
-
-    const reps     = Analytics.reports({ from, to });
-    const prevReps = Analytics.reports(prev);
-    const stats     = Analytics.sumStats(reps);
-    const prevStats = Analytics.sumStats(prevReps);
-    const comp      = Analytics.compliance({ from, to });
-
-    /* لكل مستشفى: إحصاء + التزام + موظفون + تقارير اليوم */
-    const today = DB.today();
-    const employees = DB.getEmployees();
-    const hospitals = DB.HOSPITALS.map(h => {
-      const hReps = reps.filter(r => r.hospital === h);
-      return {
-        name: h,
-        stats: Analytics.sumStats(hReps),
-        prevStats: Analytics.sumStats(prevReps.filter(r => r.hospital === h)),
-        comp: Analytics.compliance({ from, to, hospital: h }),
-        employees: employees.filter(e => e.hospital === h).length,
-        todayReports: DB.getReports().filter(r => r.hospital === h && r.date === today && r.status !== 'rejected').length,
-      };
-    });
-
-    /* لكل قسم (عبر كل المستشفيات): إحصاء الفترة + الفترة السابقة */
-    const deptMap = {};
-    const bucket = (list, key) => {
-      list.forEach(r => {
-        if (!r.department) return;
-        const id = `${r.hospital}|${r.department}`;
-        (deptMap[id] ??= { hospital: r.hospital, department: r.department, cur: [], prv: [] })[key].push(r);
-      });
-    };
-    bucket(reps, 'cur'); bucket(prevReps, 'prv');
-    const departments = Object.values(deptMap).map(d => ({
-      ...d,
-      stats: Analytics.sumStats(d.cur),
-      prevStats: Analytics.sumStats(d.prv),
-    }));
-
-    const pendingAll = DB.getReports().filter(r =>
-      r.date >= from && r.date <= to && r.status === 'pending').length;
-
-    return { from, to, prev, reps, prevReps, stats, prevStats, comp, hospitals, departments, pendingAll, today };
-  },
+  _buildContext() { return Analytics.overview(this.range); },
 
   /* ======================================================
      4) العرض الكامل
@@ -338,124 +294,12 @@ const ExecutiveApp = {
      ====================================================== */
   _chart(id, config) { Analytics.chart(this._charts, id, config); },
 
-  /* ---- اتجاه الحضور: يومي حتى 62 يوماً وإلا تجميع شهري ---- */
-  renderTrendChart(ctx) {
-    const allDays = Analytics.days(ctx.from, ctx.to);
-    let labels, buckets;
-    if (allDays.length <= 62) {
-      labels = allDays.map(d => d.slice(5));
-      buckets = allDays.map(d => ctx.reps.filter(r => r.date === d));
-    } else {
-      const byMonth = {};
-      ctx.reps.forEach(r => (byMonth[r.date.slice(0, 7)] ??= []).push(r));
-      const months = [...new Set(allDays.map(d => d.slice(0, 7)))];
-      labels = months;
-      buckets = months.map(m => byMonth[m] || []);
-    }
-    const per = buckets.map(b => Analytics.sumStats(b));
-    this._chart('execChartTrend', {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [
-          { label: 'حاضر', data: per.map(s => s.present), borderColor: '#27ae60', backgroundColor: 'rgba(39,174,96,.12)', fill: true, tension: .35 },
-          { label: 'غائب', data: per.map(s => s.absent), borderColor: '#e74c3c', backgroundColor: 'rgba(231,76,60,.10)', fill: true, tension: .35 },
-        ],
-      },
-      options: { responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { position: 'bottom', rtl: true } },
-        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
-    });
-  },
-
-  /* ---- مقارنة أسبوعية: هذا الأسبوع مقابل الأسبوع الماضي ---- */
-  renderWeeklyChart() {
-    const cur = DB.weekRange();
-    const prv = Analytics.prevRange(cur.from, cur.to);
-    const rateByDay = range => Analytics.days(range.from, range.to, 7).map(d =>
-      Analytics.sumStats(Analytics.reports({ from: d, to: d })).rate);
-    this._chart('execChartWeekly', {
-      type: 'bar',
-      data: {
-        labels: DB.DAYS,
-        datasets: [
-          { label: 'الأسبوع الحالي', data: rateByDay(cur), backgroundColor: 'rgba(41,128,185,.75)', borderRadius: 5 },
-          { label: 'الأسبوع الماضي', data: rateByDay(prv), backgroundColor: 'rgba(138,154,176,.45)', borderRadius: 5 },
-        ],
-      },
-      options: { responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { position: 'bottom', rtl: true } },
-        scales: { y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } } } },
-    });
-  },
-
-  /* ---- مقارنة شهرية: آخر 6 أشهر ---- */
-  renderMonthlyChart() {
-    const t = new Date();
-    const months = [];
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(t.getFullYear(), t.getMonth() - i, 1);
-      months.push({ key: DB.localISO(d).slice(0, 7),
-                    from: DB.localISO(d),
-                    to: DB.localISO(new Date(d.getFullYear(), d.getMonth() + 1, 0)) });
-    }
-    const rates = months.map(m => Analytics.sumStats(Analytics.reports(m)).rate);
-    this._chart('execChartMonthly', {
-      type: 'bar',
-      data: {
-        labels: months.map(m => m.key),
-        datasets: [{ label: 'نسبة الحضور %', data: rates,
-          backgroundColor: rates.map(r => r === null ? '#8a9ab0'
-            : r >= Analytics.THRESHOLDS.green ? '#27ae60'
-            : r >= Analytics.THRESHOLDS.yellow ? '#e67e22' : '#e74c3c'),
-          borderRadius: 6 }],
-      },
-      options: { responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: { y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } } } },
-    });
-  },
-
-  /* ---- ترتيب الأقسام (أفضل 10 حسب نسبة الحضور) ---- */
-  renderDeptRanking(ctx) {
-    const ranked = ctx.departments
-      .filter(d => d.stats.rate !== null)
-      .sort((a, b) => b.stats.rate - a.stats.rate)
-      .slice(0, 10);
-    this._chart('execChartDeptRank', {
-      type: 'bar',
-      data: {
-        labels: ranked.length ? ranked.map(d => d.department) : ['لا بيانات'],
-        datasets: [{ label: 'نسبة الحضور %',
-          data: ranked.length ? ranked.map(d => Math.round(d.stats.rate)) : [0],
-          backgroundColor: ranked.length ? ranked.map(d =>
-            d.stats.rate >= Analytics.THRESHOLDS.green ? '#27ae60'
-            : d.stats.rate >= Analytics.THRESHOLDS.yellow ? '#e67e22' : '#e74c3c') : ['#8a9ab0'],
-          borderRadius: 5 }],
-      },
-      options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: { x: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } } } },
-    });
-  },
-
-  /* ---- ترتيب المستشفيات ---- */
-  renderHospRanking(ctx) {
-    const sorted = [...ctx.hospitals].sort((a, b) => (b.stats.rate ?? -1) - (a.stats.rate ?? -1));
-    this._chart('execChartHospRank', {
-      type: 'bar',
-      data: {
-        labels: sorted.map(h => h.name),
-        datasets: [{ label: 'نسبة الحضور %',
-          data: sorted.map(h => h.stats.rate === null ? 0 : Math.round(h.stats.rate)),
-          backgroundColor: sorted.map(h => (Analytics.HOSPITAL_META[h.name] || {}).color || '#2980b9'),
-          borderRadius: 6 }],
-      },
-      options: { responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: { y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } } } },
-    });
-  },
+  /* ---- الرسوم: إعداداتها من مصانع الطبقة المشتركة ---- */
+  renderTrendChart(ctx) { this._chart('execChartTrend',    Analytics.chartCfg.trend(ctx.reps, ctx.from, ctx.to)); },
+  renderWeeklyChart()   { this._chart('execChartWeekly',   Analytics.chartCfg.weeklyCompare()); },
+  renderMonthlyChart()  { this._chart('execChartMonthly',  Analytics.chartCfg.monthlyCompare(6)); },
+  renderDeptRanking(ctx){ this._chart('execChartDeptRank', Analytics.chartCfg.deptRank(ctx.departments, 10)); },
+  renderHospRanking(ctx){ this._chart('execChartHospRank', Analytics.chartCfg.hospitalRank(ctx.hospitals)); },
 
   /* ---- تقدم مؤشرات الأداء (عدادات دائرية) ---- */
   renderKpiProgress(ctx) {
@@ -467,16 +311,9 @@ const ExecutiveApp = {
       { id: 'execGaugeApproval',   label: 'execGaugeApprovalVal',   value: approval,        color: '#8e44ad' },
     ];
     gauges.forEach(g => {
-      const v = g.value === null ? 0 : Math.round(g.value);
       const el = document.getElementById(g.label);
       if (el) { el.textContent = this._pct(g.value); el.style.color = g.color; }
-      this._chart(g.id, {
-        type: 'doughnut',
-        data: { labels: ['محقق', 'متبقٍ'],
-          datasets: [{ data: [v, 100 - v], backgroundColor: [g.color, 'rgba(138,154,176,.18)'], borderWidth: 0 }] },
-        options: { responsive: true, maintainAspectRatio: false, cutout: '72%',
-          plugins: { legend: { display: false }, tooltip: { enabled: false } } },
-      });
+      this._chart(g.id, Analytics.chartCfg.gauge(g.value, g.color));
     });
   },
 
@@ -554,46 +391,8 @@ const ExecutiveApp = {
   renderInsights(ctx) {
     const box = document.getElementById('execInsights');
     if (!box) return;
-    const out = [];
-    const periodWord = this.preset === 'today' ? 'أمس' : 'الفترة السابقة';
-
-    // تغير الحضور مقارنة بالفترة السابقة
-    if (ctx.stats.rate !== null && ctx.prevStats.rate !== null) {
-      const d = Math.round(ctx.stats.rate - ctx.prevStats.rate);
-      if (d > 0)      out.push({ cls: 'up',   icon: 'fa-arrow-trend-up',   text: `ارتفعت نسبة الحضور بمقدار ${d} نقطة مقارنة بـ${periodWord} (${Math.round(ctx.prevStats.rate)}% ← ${Math.round(ctx.stats.rate)}%).` });
-      else if (d < 0) out.push({ cls: 'down', icon: 'fa-arrow-trend-down', text: `انخفضت نسبة الحضور بمقدار ${Math.abs(d)} نقطة مقارنة بـ${periodWord} (${Math.round(ctx.prevStats.rate)}% ← ${Math.round(ctx.stats.rate)}%).` });
-      else            out.push({ cls: '',     icon: 'fa-equals',           text: `نسبة الحضور مستقرة عند ${Math.round(ctx.stats.rate)}% دون تغيّر عن ${periodWord}.` });
-    }
-
-    // الأعلى التزاماً برفع التقارير
-    const withComp = ctx.hospitals.filter(h => h.comp.rate !== null);
-    if (withComp.length) {
-      const best = withComp.reduce((a, b) => a.comp.rate >= b.comp.rate ? a : b);
-      out.push({ cls: 'up', icon: 'fa-clipboard-check', text: `${best.name} الأعلى التزاماً برفع التقارير (${Math.round(best.comp.rate)}%).` });
-    }
-
-    // قسم يتطلب متابعة (الأدنى حضوراً)
-    const deptsWithData = ctx.departments.filter(d => d.stats.rate !== null && d.stats.denom >= 5);
-    if (deptsWithData.length) {
-      const worst = deptsWithData.reduce((a, b) => a.stats.rate <= b.stats.rate ? a : b);
-      if (worst.stats.rate < Analytics.THRESHOLDS.yellow)
-        out.push({ cls: 'warn', icon: 'fa-circle-exclamation', text: `قسم ${worst.department} (${worst.hospital}) يتطلب متابعة — نسبة الحضور ${Math.round(worst.stats.rate)}%.` });
-    }
-
-    // القسم الأكثر تحسناً
-    const improvable = ctx.departments.filter(d => d.stats.rate !== null && d.prevStats.rate !== null);
-    if (improvable.length) {
-      const best = improvable.reduce((a, b) => (a.stats.rate - a.prevStats.rate) >= (b.stats.rate - b.prevStats.rate) ? a : b);
-      const delta = Math.round(best.stats.rate - best.prevStats.rate);
-      if (delta >= 3)
-        out.push({ cls: 'up', icon: 'fa-arrow-trend-up', text: `قسم ${best.department} تحسّن بشكل ملحوظ (+${delta} نقطة مقارنة بالفترة السابقة).` });
-    }
-
-    // تقارير معلقة وخانات ناقصة
-    if (ctx.pendingAll)
-      out.push({ cls: 'warn', icon: 'fa-hourglass-half', text: `${ctx.pendingAll} تقرير بانتظار الاعتماد — يُنصح بمراجعتها لضمان دقة المؤشرات.` });
-    if (ctx.comp.missing)
-      out.push({ cls: 'warn', icon: 'fa-file-circle-xmark', text: `${ctx.comp.missing} خانة تقرير لم تُرفع خلال الفترة (نسبة الالتزام ${Math.round(ctx.comp.rate)}%).` });
+    // توليد الرؤى في الطبقة المشتركة — العرض فقط هنا
+    const out = Analytics.observations(ctx, this.preset === 'today' ? 'أمس' : 'الفترة السابقة');
 
     box.innerHTML = out.length
       ? out.map(i => `<div class="exec-insight ${i.cls}"><i class="fas ${i.icon}"></i><span>${esc(i.text)}</span></div>`).join('')
