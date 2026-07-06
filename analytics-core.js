@@ -59,12 +59,15 @@ const Analytics = {
     return                                     { cls: 'status-red',    label: 'حرج',            emoji: '🔴' };
   },
 
-  /* ---- التقارير ضمن نطاق (المرفوضة مستبعدة دائماً) ---- */
-  reports({ from, to, hospital = null, department = null } = {}) {
+  /* ---- التقارير ضمن نطاق (المرفوضة مستبعدة دائماً) ----
+     فلاتر اختيارية: مستشفى / قسم / موظف (بالكود) / حالة الاعتماد */
+  reports({ from, to, hospital = null, department = null, employee = null, status = null } = {}) {
     let list = DB.getReports().filter(r =>
       r.date >= from && r.date <= to && r.status !== 'rejected');
     if (hospital)   list = list.filter(r => r.hospital === hospital);
     if (department) list = list.filter(r => r.department === department);
+    if (employee)   list = list.filter(r => (r.employeeCode || '').toUpperCase() === employee.toUpperCase());
+    if (status)     list = list.filter(r => r.status === status);
     return list;
   },
 
@@ -131,6 +134,229 @@ const Analytics = {
       rate: (covered / expected) * 100,
       submitted: reps.length,
     };
+  },
+
+  /* ======================================================
+     النظرة الشاملة (overview) — سياق تحليلي كامل يُحسب مرة
+     واحدة ويغذي كل اللوحات. تستخدمه لوحة القيادة (المرحلة 10)
+     ونظام التقارير (المرحلة 15) — بلا تكرار كود.
+     opts: { from, to, hospital?, department?, employee?, status? }
+     ====================================================== */
+  overview(opts) {
+    const { from, to } = opts;
+    const prev = this.prevRange(from, to);
+    const filt = {
+      hospital:   opts.hospital   || null,
+      department: opts.department || null,
+      employee:   opts.employee   || null,
+      status:     opts.status     || null,
+    };
+
+    const reps     = this.reports({ from, to, ...filt });
+    const prevReps = this.reports({ from: prev.from, to: prev.to, ...filt });
+    const stats     = this.sumStats(reps);
+    const prevStats = this.sumStats(prevReps);
+    const comp      = this.compliance({ from, to, hospital: filt.hospital });
+
+    /* لكل مستشفى: إحصاء + التزام + موظفون + تقارير اليوم
+       (تُشتق من reps المفلترة أصلاً — الفلاتر تسري تلقائياً) */
+    const today = DB.today();
+    const employees = DB.getEmployees();
+    const hospitals = DB.HOSPITALS.map(h => ({
+      name: h,
+      stats: this.sumStats(reps.filter(r => r.hospital === h)),
+      prevStats: this.sumStats(prevReps.filter(r => r.hospital === h)),
+      comp: this.compliance({ from, to, hospital: h }),
+      employees: employees.filter(e => e.hospital === h).length,
+      todayReports: DB.getReports().filter(r => r.hospital === h && r.date === today && r.status !== 'rejected').length,
+    }));
+
+    /* لكل قسم: إحصاء الفترة + الفترة السابقة */
+    const deptMap = {};
+    const bucket = (list, key) => list.forEach(r => {
+      if (!r.department) return;
+      const id = `${r.hospital}|${r.department}`;
+      (deptMap[id] ??= { hospital: r.hospital, department: r.department, cur: [], prv: [] })[key].push(r);
+    });
+    bucket(reps, 'cur'); bucket(prevReps, 'prv');
+    const departments = Object.values(deptMap).map(d => ({
+      ...d,
+      stats: this.sumStats(d.cur),
+      prevStats: this.sumStats(d.prv),
+    }));
+
+    const pendingAll = DB.getReports().filter(r =>
+      r.date >= from && r.date <= to && r.status === 'pending' &&
+      (!filt.hospital || r.hospital === filt.hospital) &&
+      (!filt.department || r.department === filt.department)).length;
+
+    return { from, to, prev, reps, prevReps, stats, prevStats, comp, hospitals, departments, pendingAll, today };
+  },
+
+  /* ======================================================
+     الملاحظات/الرؤى الآلية — جُمل إدارية مولّدة من overview
+     تُعيد مصفوفة { cls, icon, text } تعرضها أي واجهة
+     ====================================================== */
+  observations(ov, periodWord = 'الفترة السابقة') {
+    const out = [];
+
+    // تغير الحضور مقارنة بالفترة السابقة
+    if (ov.stats.rate !== null && ov.prevStats.rate !== null) {
+      const d = Math.round(ov.stats.rate - ov.prevStats.rate);
+      if (d > 0)      out.push({ cls: 'up',   icon: 'fa-arrow-trend-up',   text: `ارتفعت نسبة الحضور بمقدار ${d} نقطة مقارنة بـ${periodWord} (${Math.round(ov.prevStats.rate)}% ← ${Math.round(ov.stats.rate)}%).` });
+      else if (d < 0) out.push({ cls: 'down', icon: 'fa-arrow-trend-down', text: `انخفضت نسبة الحضور بمقدار ${Math.abs(d)} نقطة مقارنة بـ${periodWord} (${Math.round(ov.prevStats.rate)}% ← ${Math.round(ov.stats.rate)}%).` });
+      else            out.push({ cls: '',     icon: 'fa-equals',           text: `نسبة الحضور مستقرة عند ${Math.round(ov.stats.rate)}% دون تغيّر عن ${periodWord}.` });
+    }
+
+    // الأعلى التزاماً برفع التقارير
+    const withComp = ov.hospitals.filter(h => h.comp.rate !== null);
+    if (withComp.length) {
+      const best = withComp.reduce((a, b) => a.comp.rate >= b.comp.rate ? a : b);
+      out.push({ cls: 'up', icon: 'fa-clipboard-check', text: `${best.name} الأعلى التزاماً برفع التقارير (${Math.round(best.comp.rate)}%).` });
+    }
+
+    // قسم يتطلب متابعة (الأدنى حضوراً وبعينة كافية)
+    const deptsWithData = ov.departments.filter(d => d.stats.rate !== null && d.stats.denom >= 5);
+    if (deptsWithData.length) {
+      const worst = deptsWithData.reduce((a, b) => a.stats.rate <= b.stats.rate ? a : b);
+      if (worst.stats.rate < this.THRESHOLDS.yellow)
+        out.push({ cls: 'warn', icon: 'fa-circle-exclamation', text: `قسم ${worst.department} (${worst.hospital}) يتطلب متابعة — نسبة الحضور ${Math.round(worst.stats.rate)}%.` });
+    }
+
+    // القسم الأكثر تحسناً
+    const improvable = ov.departments.filter(d => d.stats.rate !== null && d.prevStats.rate !== null);
+    if (improvable.length) {
+      const best = improvable.reduce((a, b) => (a.stats.rate - a.prevStats.rate) >= (b.stats.rate - b.prevStats.rate) ? a : b);
+      const delta = Math.round(best.stats.rate - best.prevStats.rate);
+      if (delta >= 3)
+        out.push({ cls: 'up', icon: 'fa-arrow-trend-up', text: `قسم ${best.department} تحسّن بشكل ملحوظ (+${delta} نقطة مقارنة بالفترة السابقة).` });
+    }
+
+    // تقارير معلقة وخانات ناقصة
+    if (ov.pendingAll)
+      out.push({ cls: 'warn', icon: 'fa-hourglass-half', text: `${ov.pendingAll} تقرير بانتظار الاعتماد — يُنصح بمراجعتها لضمان دقة المؤشرات.` });
+    if (ov.comp.missing)
+      out.push({ cls: 'warn', icon: 'fa-file-circle-xmark', text: `${ov.comp.missing} خانة تقرير لم تُرفع خلال الفترة (نسبة الالتزام ${Math.round(ov.comp.rate)}%).` });
+
+    return out;
+  },
+
+  /* ======================================================
+     مصانع إعدادات Chart.js — إعداد واحد تستهلكه أي صفحة
+     (لوحة القيادة، معاينة التقارير…) دون تكرار
+     ====================================================== */
+  chartCfg: {
+    /* اتجاه الحضور: يومي حتى 62 يوماً وإلا تجميع شهري */
+    trend(reps, from, to) {
+      const allDays = Analytics.days(from, to);
+      let labels, buckets;
+      if (allDays.length <= 62) {
+        labels = allDays.map(d => d.slice(5));
+        buckets = allDays.map(d => reps.filter(r => r.date === d));
+      } else {
+        const byMonth = {};
+        reps.forEach(r => (byMonth[r.date.slice(0, 7)] ??= []).push(r));
+        const months = [...new Set(allDays.map(d => d.slice(0, 7)))];
+        labels = months;
+        buckets = months.map(m => byMonth[m] || []);
+      }
+      const per = buckets.map(b => Analytics.sumStats(b));
+      return {
+        type: 'line',
+        data: { labels, datasets: [
+          { label: 'حاضر', data: per.map(s => s.present), borderColor: '#27ae60', backgroundColor: 'rgba(39,174,96,.12)', fill: true, tension: .35 },
+          { label: 'غائب', data: per.map(s => s.absent), borderColor: '#e74c3c', backgroundColor: 'rgba(231,76,60,.10)', fill: true, tension: .35 },
+        ]},
+        options: { responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', rtl: true } },
+          scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
+      };
+    },
+
+    /* هذا الأسبوع مقابل الماضي (نسبة الحضور لكل يوم) */
+    weeklyCompare(filter = {}) {
+      const cur = DB.weekRange();
+      const prv = Analytics.prevRange(cur.from, cur.to);
+      const rateByDay = range => Analytics.days(range.from, range.to, 7).map(d =>
+        Analytics.sumStats(Analytics.reports({ from: d, to: d, ...filter })).rate);
+      return {
+        type: 'bar',
+        data: { labels: DB.DAYS, datasets: [
+          { label: 'الأسبوع الحالي', data: rateByDay(cur), backgroundColor: 'rgba(41,128,185,.75)', borderRadius: 5 },
+          { label: 'الأسبوع الماضي', data: rateByDay(prv), backgroundColor: 'rgba(138,154,176,.45)', borderRadius: 5 },
+        ]},
+        options: { responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', rtl: true } },
+          scales: { y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } } } },
+      };
+    },
+
+    /* آخر n أشهر (نسبة الحضور الشهرية) */
+    monthlyCompare(n = 6, filter = {}) {
+      const t = new Date(), months = [];
+      for (let i = n - 1; i >= 0; i--) {
+        const d = new Date(t.getFullYear(), t.getMonth() - i, 1);
+        months.push({ key: DB.localISO(d).slice(0, 7), from: DB.localISO(d),
+                      to: DB.localISO(new Date(d.getFullYear(), d.getMonth() + 1, 0)) });
+      }
+      const rates = months.map(m => Analytics.sumStats(Analytics.reports({ ...m, ...filter })).rate);
+      const TH = Analytics.THRESHOLDS;
+      return {
+        type: 'bar',
+        data: { labels: months.map(m => m.key), datasets: [{ label: 'نسبة الحضور %', data: rates,
+          backgroundColor: rates.map(r => r === null ? '#8a9ab0' : r >= TH.green ? '#27ae60' : r >= TH.yellow ? '#e67e22' : '#e74c3c'),
+          borderRadius: 6 }] },
+        options: { responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } } } },
+      };
+    },
+
+    /* مقارنة/ترتيب المستشفيات (من مصفوفة hospitals في overview) */
+    hospitalRank(hospitals) {
+      const sorted = [...hospitals].sort((a, b) => (b.stats.rate ?? -1) - (a.stats.rate ?? -1));
+      return {
+        type: 'bar',
+        data: { labels: sorted.map(h => h.name), datasets: [{ label: 'نسبة الحضور %',
+          data: sorted.map(h => h.stats.rate === null ? 0 : Math.round(h.stats.rate)),
+          backgroundColor: sorted.map(h => (Analytics.HOSPITAL_META[h.name] || {}).color || '#2980b9'),
+          borderRadius: 6 }] },
+        options: { responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } } } },
+      };
+    },
+
+    /* ترتيب الأقسام (أفضل topN من مصفوفة departments في overview) */
+    deptRank(departments, topN = 10) {
+      const TH = Analytics.THRESHOLDS;
+      const ranked = departments.filter(d => d.stats.rate !== null)
+        .sort((a, b) => b.stats.rate - a.stats.rate).slice(0, topN);
+      return {
+        type: 'bar',
+        data: { labels: ranked.length ? ranked.map(d => d.department) : ['لا بيانات'],
+          datasets: [{ label: 'نسبة الحضور %',
+            data: ranked.length ? ranked.map(d => Math.round(d.stats.rate)) : [0],
+            backgroundColor: ranked.length ? ranked.map(d =>
+              d.stats.rate >= TH.green ? '#27ae60' : d.stats.rate >= TH.yellow ? '#e67e22' : '#e74c3c') : ['#8a9ab0'],
+            borderRadius: 5 }] },
+        options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: { x: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } } } },
+      };
+    },
+
+    /* عداد دائري لمؤشر واحد */
+    gauge(value, color) {
+      const v = value === null ? 0 : Math.round(value);
+      return {
+        type: 'doughnut',
+        data: { labels: ['محقق', 'متبقٍ'],
+          datasets: [{ data: [v, 100 - v], backgroundColor: [color, 'rgba(138,154,176,.18)'], borderWidth: 0 }] },
+        options: { responsive: true, maintainAspectRatio: false, cutout: '72%',
+          plugins: { legend: { display: false }, tooltip: { enabled: false } } },
+      };
+    },
   },
 
   /* ======================================================
