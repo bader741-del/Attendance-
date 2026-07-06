@@ -1,5 +1,5 @@
 /* Service Worker — منصة مراقبة الدوام */
-const CACHE = 'mksh-attendance-v3';
+const CACHE = 'mksh-attendance-v4';
 const CORE = [
   './',
   './index.html',
@@ -8,6 +8,10 @@ const CORE = [
   './hospital-map.html',
   './hospital-map.css',
   './hospital-map.js',
+  './analytics-core.js',
+  './executive.html',
+  './executive.css',
+  './executive.js',
   './style.css',
   './script.js',
   './config.js',
