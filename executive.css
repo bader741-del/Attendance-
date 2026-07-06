@@ -1,0 +1,282 @@
+/* ============================================================
+   مركز القيادة التنفيذي — الأنماط (المرحلة 10)
+   executive.css
+   ------------------------------------------------------------
+   ملف مستقل لا يعدّل أي نمط قائم. يعتمد على متغيرات style.css
+   ويعيد استخدام أنماط hospital-map.css المشتركة (شرائح الفلاتر،
+   شارات الحالة) — لذا يتوافق مع الوضع الليلي والجوال تلقائياً.
+   ============================================================ */
+
+/* ======== هيكل الصفحة ======== */
+.exec-page {
+  min-height: 100vh;
+  background: var(--bg);
+  display: none;                /* تُظهر بعد التحقق من الجلسة */
+  flex-direction: column;
+}
+
+.exec-body {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* ترويسة تنفيذية داكنة (ثابتة في الوضعين — مظهر قيادي) */
+.exec-topbar {
+  height: var(--header-h);
+  background: linear-gradient(135deg, var(--primary-dark), #14304f);
+  border-bottom: 3px solid var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px;
+  position: sticky;
+  top: 0;
+  z-index: 500;
+  box-shadow: var(--shadow-md);
+}
+.exec-topbar .exec-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 17px;
+  font-weight: 800;
+}
+.exec-topbar .exec-title i { color: var(--accent); }
+.exec-topbar .exec-title small { display: block; font-size: 11px; font-weight: 500; opacity: .75; }
+.exec-topbar .btn-ghost { color: rgba(255,255,255,.85); }
+.exec-topbar .btn-ghost:hover { background: rgba(255,255,255,.12); color: #fff; }
+
+.exec-live {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-right: auto;
+  background: rgba(26,188,156,.15);
+  border: 1px solid rgba(26,188,156,.45);
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: #7ce8d2;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ======== عناوين الأقسام ======== */
+.exec-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text);
+  margin: 4px 2px 0;
+}
+.exec-section-title i { color: var(--secondary); }
+.exec-section-title .hint { font-size: 12px; font-weight: 500; color: var(--text-muted); margin-right: 6px; }
+
+/* ======== شبكة مؤشرات الأداء التنفيذية ======== */
+.exec-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.exec-kpi {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: var(--shadow);
+  border-right: 4px solid var(--kpi-color, var(--secondary));
+}
+.exec-kpi .exec-kpi-icon {
+  width: 40px; height: 40px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 17px;
+  color: var(--kpi-color, var(--secondary));
+  background: color-mix(in srgb, var(--kpi-color, var(--secondary)) 14%, transparent);
+  flex-shrink: 0;
+}
+.exec-kpi b { display: block; font-size: 22px; line-height: 1.1; color: var(--text); }
+.exec-kpi span { font-size: 11.5px; color: var(--text-muted); font-weight: 600; }
+.exec-kpi .exec-kpi-trend { font-size: 11px; font-weight: 700; margin-right: 4px; }
+
+/* ======== لوحات عامة (بطاقة بيضاء بعنوان) ======== */
+.exec-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+.exec-panel .exec-panel-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13.5px; font-weight: 700; color: var(--text);
+  margin-bottom: 12px;
+}
+.exec-panel .exec-panel-title i { color: var(--secondary); }
+
+/* صفوف الرسوم */
+.exec-charts-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.exec-charts-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.exec-chart-canvas    { position: relative; height: 260px; }
+.exec-chart-canvas.sm { height: 210px; }
+
+/* ======== التنبيهات ======== */
+.exec-alerts { display: flex; flex-direction: column; gap: 8px; }
+.exec-alert {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid;
+}
+.exec-alert.danger  { background: var(--danger-bg);  border-color: var(--danger-border);  color: var(--danger); }
+.exec-alert.warning { background: var(--warning-bg); border-color: var(--warning-border); color: var(--warning); }
+.exec-alert.info    { background: var(--info-bg);    border-color: var(--info-border);    color: var(--info); }
+.exec-alert.ok      { background: var(--success-bg); border-color: var(--success-border); color: var(--success); }
+
+/* ======== الأفضل أداءً ======== */
+.exec-top-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.exec-top-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  text-align: center;
+  border-top: 4px solid var(--accent);
+}
+.exec-top-card .exec-top-icon {
+  width: 44px; height: 44px; margin: 0 auto 8px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent-dark);
+}
+.exec-top-card .exec-top-label { font-size: 11.5px; color: var(--text-muted); font-weight: 700; }
+.exec-top-card .exec-top-value { font-size: 15px; font-weight: 800; color: var(--text); margin-top: 4px; line-height: 1.4; }
+.exec-top-card .exec-top-sub   { font-size: 12px; color: var(--text-light); margin-top: 2px; }
+
+/* ======== الرؤى الذكية ======== */
+.exec-insights { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
+.exec-insight {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-light);
+  border-right: 4px solid var(--secondary);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.7;
+}
+.exec-insight i { margin-top: 3px; color: var(--secondary); flex-shrink: 0; }
+.exec-insight.up      { border-right-color: var(--success); }
+.exec-insight.up i    { color: var(--success); }
+.exec-insight.down    { border-right-color: var(--danger); }
+.exec-insight.down i  { color: var(--danger); }
+.exec-insight.warn    { border-right-color: var(--warning); }
+.exec-insight.warn i  { color: var(--warning); }
+
+/* ======== الخريطة الحرارية ======== */
+.exec-heatmap-wrap { overflow-x: auto; padding-bottom: 4px; }
+.exec-heatmap { border-collapse: separate; border-spacing: 3px; }
+.exec-heatmap th {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-weight: 600;
+  padding: 2px 4px;
+  text-align: center;
+  white-space: nowrap;
+}
+.exec-heatmap td.hm-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  padding: 0 8px;
+  white-space: nowrap;
+}
+.exec-heatmap td.hm-cell {
+  width: 26px; height: 26px;
+  min-width: 26px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-light);
+}
+.hm-cell.hm-green  { background: var(--success); border-color: var(--success); }
+.hm-cell.hm-yellow { background: var(--warning); border-color: var(--warning); }
+.hm-cell.hm-red    { background: var(--danger);  border-color: var(--danger); }
+.hm-cell.hm-empty  { background: var(--surface-2); }
+.exec-heatmap-legend {
+  display: flex; align-items: center; gap: 14px;
+  font-size: 11.5px; color: var(--text-muted); margin-top: 8px;
+}
+.exec-heatmap-legend .lg { display: inline-flex; align-items: center; gap: 5px; }
+.exec-heatmap-legend .sw { width: 13px; height: 13px; border-radius: 4px; display: inline-block; }
+
+/* ======== جدول مقارنة المستشفيات ======== */
+.exec-compare-table td, .exec-compare-table th { text-align: center; }
+.exec-compare-table td:first-child { text-align: right; }
+.exec-mini-bar {
+  height: 6px; border-radius: 4px; background: var(--surface-2);
+  border: 1px solid var(--border-light); overflow: hidden; margin-top: 5px;
+}
+.exec-mini-bar > div { height: 100%; border-radius: 4px; }
+
+/* ======== أزرار التصدير ======== */
+.exec-export-bar { display: flex; gap: 8px; margin-right: auto; }
+
+/* ======== تجاوب ======== */
+@media (max-width: 1024px) {
+  .exec-charts-3 { grid-template-columns: 1fr; }
+  .exec-charts-2 { grid-template-columns: 1fr; }
+}
+@media (max-width: 768px) {
+  .exec-body { padding: 12px; gap: 12px; }
+  .exec-topbar { padding: 0 10px; gap: 6px; }
+  .exec-live { display: none; }
+  .exec-kpi b { font-size: 18px; }
+  .exec-chart-canvas { height: 220px; }
+}
+
+/* ======== الطباعة / PDF ========
+   يطبع المحتوى فقط بخلفية بيضاء — الشريط العلوي والفلاتر
+   وأزرار التصدير تُخفى ================================== */
+@media print {
+  body { background: #fff !important; }
+  .exec-topbar, .map-filters, .exec-export-bar, .theme-toggle { display: none !important; }
+  .exec-page { display: block !important; }
+  .exec-panel, .exec-kpi, .exec-top-card { box-shadow: none !important; break-inside: avoid; }
+  .exec-body { max-width: 100%; padding: 0; }
+  .exec-print-header { display: block !important; }
+}
+.exec-print-header {
+  display: none;
+  text-align: center;
+  padding: 10px 0 16px;
+  border-bottom: 2px solid #1a3a5c;
+  margin-bottom: 16px;
+}
+.exec-print-header h1 { font-size: 18px; color: #1a3a5c; }
+.exec-print-header p  { font-size: 12px; color: #5a6a7e; }
