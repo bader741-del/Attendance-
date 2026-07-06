@@ -221,8 +221,8 @@ const DB = {
     this._saveReports(r);
     this.audit('اعتماد تقرير', `${r[i].date} — ${r[i].hospital || ''} / ${r[i].department || ''} (${r[i].period || ''})`);
     if (r[i].sigId) Sync.upSig(r[i].sigId);
-    Sync.up('reports', r[i]);
-    return true;
+    // الحفظ السحابي يتم مباشرةً (بانتظار النتيجة) من AdminApp.approveReport عبر Sync.pushReportApproval
+    return r[i];
   },
   rejectReport(id, reason) {
     const r = this.getReports();
@@ -344,6 +344,76 @@ const Sync = {
   queueAudit(action, details) { if (Cloud.on()) this._queue({ kind: 'audit', row: { action, details, actor: 'المسؤول' } }); },
   queueSubmit(report, code)   { if (Cloud.on()) this._queue({ kind: 'rpc_submit', code, payload: { ...report, client_id: report.id } }); },
 
+  /* ---- حفظ الاعتماد مباشرةً في Supabase (بانتظار النتيجة، مع كشف فشل RLS) ----
+     يعيد { ok, queued?, local?, error? }:
+     - ok:true  local:true   → السحابة غير مفعّلة، الحفظ محلي فقط
+     - ok:true  queued:true  → لا اتصال، أُضيف لصف الانتظار وسيُزامن لاحقاً
+     - ok:false error        → فشل الحفظ (RLS / صلاحيات / خطأ خادم) */
+  async pushReportApproval(rec) {
+    if (!Cloud.on()) {
+      console.warn('[اعتماد] Supabase غير مرتبط — config.js ما زال يحوي القيم النائبة (YOUR-PROJECT-REF). الحفظ محلي فقط في هذا المتصفح ولن يصل أي UPDATE لقاعدة البيانات.');
+      return { ok: true, local: true };
+    }
+    const row = this.toCloud('reports', rec);
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      this._queue({ kind: 'upsert', table: 'reports', row });
+      return { ok: true, queued: true };
+    }
+    const patch = {
+      status:         row.status,
+      approved_by:    row.approved_by    ?? null,
+      approver_title: row.approver_title ?? null,
+      approved_at:    row.approved_at    ?? null,
+      sig_id:         row.sig_id         ?? null,
+    };
+    try {
+      // (1) قراءة الصف قبل UPDATE — تشخيص + كشف مشاكل SELECT/الجلسة مبكراً
+      const { data: before, error: beforeErr } = await Cloud.sb.from('reports')
+        .select('client_id,status,approved_by,approver_title,approved_at')
+        .eq('client_id', rec.id).maybeSingle();
+      if (beforeErr) {
+        console.error('[اعتماد][قبل UPDATE] فشل SELECT — غالباً جلسة Supabase Auth غير فعّالة أو المستخدم ليس في admin_users:', beforeErr);
+        return { ok: false, error: beforeErr };
+      }
+      console.log('[اعتماد][قبل UPDATE]', before ?? '(الصف غير موجود في السحابة بعد)');
+
+      // (2) UPDATE مع select() — إن أعاد صفراً من الصفوف مع وجود الصف فالسبب RLS
+      const { data, error } = await Cloud.sb.from('reports')
+        .update(patch).eq('client_id', rec.id).select('client_id,status,approved_by,approver_title,approved_at');
+      console.log('[اعتماد][نتيجة UPDATE]', error ?? data);
+      if (error) return { ok: false, error };
+
+      if (!data?.length) {
+        if (before) {
+          return { ok: false, error: new Error(
+            'RLS منع تحديث الصف (policy "admin update reports") — تأكد أن مستخدم المسؤول مسجّل في جدول admin_users وأن الدخول تم عبر Supabase Auth') };
+        }
+        // الصف غير موجود بالسحابة بعد → إدراجه كاملاً
+        const { error: upErr } = await Cloud.sb.from('reports').upsert(row, { onConflict: 'client_id' });
+        if (upErr) { console.error('[اعتماد] فشل upsert:', upErr); return { ok: false, error: upErr }; }
+      }
+
+      // (3) إعادة تحميل السجل من قاعدة البيانات (وليس من الذاكرة المحلية) للتحقق النهائي
+      const { data: fresh, error: freshErr } = await Cloud.sb.from('reports')
+        .select('*').eq('client_id', rec.id).maybeSingle();
+      console.log('[اعتماد][بعد UPDATE — أُعيد تحميله من قاعدة البيانات]', freshErr ?? fresh);
+      if (freshErr) return { ok: false, error: freshErr };
+      if (!fresh || fresh.status !== 'approved') {
+        return { ok: false, error: new Error('الحالة في قاعدة البيانات ما زالت "' + (fresh?.status ?? 'غير موجود') + '" رغم عدم ظهور خطأ — راجع سياسات RLS') };
+      }
+      // مزامنة النسخة المحلية من نسخة قاعدة البيانات المؤكدة
+      const local = DB.getReports();
+      const i = local.findIndex(x => x.id === rec.id);
+      if (i >= 0) { local[i] = { ...local[i], ...this.fromCloud('reports', fresh) }; DB._saveReports(local); }
+      return { ok: true };
+    } catch (e) {
+      // خطأ شبكة → صف الانتظار لإعادة المحاولة
+      console.warn('[اعتماد] خطأ شبكة — أُضيف للمزامنة اللاحقة:', e);
+      this._queue({ kind: 'upsert', table: 'reports', row });
+      return { ok: true, queued: true };
+    }
+  },
+
   async flush() {
     if (!Cloud.on() || this._flushing || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
     this._flushing = true;
@@ -431,7 +501,11 @@ const Sync = {
 
   /* ---- بعد دخول المسؤول: رفع أولي إن لزم، ثم سحب دوري ---- */
   async onAdminLogin() {
-    if (!Cloud.on()) return;
+    if (!Cloud.on()) {
+      console.warn('[مزامنة] Supabase غير مرتبط: config.js يحوي القيم النائبة (YOUR-PROJECT-REF / YOUR-ANON) — كل البيانات محلية في هذا المتصفح فقط ولن يُحفظ أي شيء في قاعدة البيانات.');
+      Toast.show('تنبيه: المنصة تعمل بوضع التخزين المحلي فقط — لم يتم ربط Supabase بعد (أدخل بيانات المشروع في config.js)', 'warning', 8000);
+      return;
+    }
     const hasLocalData = DB.getReports().length || DB.getEmployees().length || DB.getDepartments().length;
     if (!this.isSeeded() && hasLocalData) {
       AdminApp._confirm('يوجد بيانات محفوظة في هذا المتصفح لم تُرفع إلى السحابة بعد. رفعها الآن؟ (لن يُحذف أو يُكرر شيء)', async () => {
@@ -1387,15 +1461,25 @@ const AdminApp = {
     this.renderReports();
   },
 
-  approveReport(id) {
+  async approveReport(id) {
     const s = DB.getSettings();
     if (!s.deputyName) Toast.show('تنبيه: لم يتم إعداد اسم النائب الإداري — سيُعتمد التقرير بدون توقيع (الإعدادات ← توقيع الاعتماد)', 'warning', 5000);
-    if (DB.approveReport(id)) {
-      Toast.show('تم اعتماد التقرير' + (s.deputySignature ? ' وختمه بتوقيع النائب الإداري' : ''), 'success');
-      this.renderReports();
-      this._updatePendingBadge();
-      this.renderAlerts();
+    const rec = DB.approveReport(id);
+    if (!rec) return;
+    // تحديث فوري للواجهة: الشارة تتغير إلى "معتمد" وزرا ✓/✗ يختفيان دون تحديث الصفحة
+    this.renderReports();
+    this._updatePendingBadge();
+    this.renderAlerts();
+    // الحفظ في Supabase بانتظار النتيجة الفعلية
+    const res = await Sync.pushReportApproval(rec);
+    if (!res.ok) {
+      console.error('[اعتماد التقرير] فشل الحفظ في Supabase — التقرير:', id, '— الخطأ:', res.error);
+      Toast.show('فشل حفظ الاعتماد في قاعدة البيانات: ' + (res.error?.message || 'خطأ غير معروف') + ' — قد تعود الحالة إلى "بانتظار الاعتماد" عند المزامنة', 'error', 8000);
+      return;
     }
+    if (res.queued)     Toast.show('تم الاعتماد محلياً — سيُحفظ في السحابة تلقائياً عند عودة الاتصال', 'warning', 5000);
+    else if (res.local) Toast.show('تم اعتماد التقرير' + (s.deputySignature ? ' وختمه بتوقيع النائب الإداري' : ''), 'success');
+    else                Toast.show('تم اعتماد التقرير وحفظه في قاعدة البيانات' + (s.deputySignature ? ' وختمه بتوقيع النائب الإداري' : ''), 'success');
   },
 
   openRejectModal(id) {

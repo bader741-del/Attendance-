@@ -1,5 +1,5 @@
 /* Service Worker — منصة مراقبة الدوام */
-const CACHE = 'mksh-attendance-v5';
+const CACHE = 'mksh-attendance-v6';
 const CORE = [
   './',
   './index.html',
