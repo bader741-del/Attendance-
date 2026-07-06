@@ -573,15 +573,27 @@ const AdminApp = {
       document.getElementById('adminContent').style.display = 'none';
       const inp = document.getElementById('adminPassInput');
       if (inp) inp.addEventListener('keydown', e => { if (e.key === 'Enter') this.login(); });
-      // استعادة جلسة سحابية سابقة (Supabase يحفظها بين الزيارات)
+      // استعادة جلسة سحابية سابقة (Supabase يحفظها بين الزيارات) — مع التحقق من صلاحيات admin_users
       if (Cloud.on()) {
-        Cloud.sb.auth.getSession().then(({ data }) => {
-          if (data?.session) { DB.setAdminSession(); this._showApp(); }
+        Cloud.sb.auth.getSession().then(async ({ data }) => {
+          if (!data?.session) return;
+          if (await this._verifyAdminRole()) { DB.setAdminSession(); this._showApp(); }
+          else Cloud.sb.auth.signOut().catch(() => {});
         }).catch(() => {});
       }
     } else {
       this._showApp();
     }
+  },
+
+  /* التحقق أن المستخدم المسجَّل حالياً موجود في جدول admin_users (صلاحيات المسؤول) */
+  async _verifyAdminRole() {
+    try {
+      const { data, error } = await Cloud.sb.from('admin_users').select('user_id').maybeSingle();
+      if (error) { console.error('[صلاحيات] فشل التحقق من admin_users:', error); return false; }
+      if (!data) console.warn('[صلاحيات] كلمة المرور صحيحة لكن المستخدم غير مسجّل في جدول admin_users — نفّذ سطر INSERT الموجود نهاية supabase-schema.sql');
+      return !!data;
+    } catch (e) { console.error('[صلاحيات] خطأ غير متوقع أثناء التحقق:', e); return false; }
   },
 
   async login() {
@@ -598,6 +610,16 @@ const AdminApp = {
           password: inp.value,
         });
         ok = !error;
+        // كلمة المرور صحيحة لكن المستخدم ليس مسؤولاً؟ أوقف الدخول برسالة واضحة
+        if (ok && !(await this._verifyAdminRole())) {
+          await Cloud.sb.auth.signOut().catch(() => {});
+          Toast.show('كلمة المرور صحيحة لكن المستخدم غير مسجّل في جدول admin_users — نفّذ في SQL Editor السطر الموجود نهاية supabase-schema.sql', 'error', 9000);
+          DB.audit('دخول مرفوض', 'المستخدم غير مسجّل في admin_users');
+          err.classList.add('show');
+          inp.value = '';
+          inp.focus();
+          return;
+        }
       } catch { ok = false; }
     } else {
       ok = await DB.verifyPass(inp.value);
