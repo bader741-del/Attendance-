@@ -6,7 +6,7 @@
    التخزين المحلي (localStorage) تماماً كما قبل الربط السحابي.
    ============================================================ */
 const SUPABASE_CONFIG = {
-  url: 'https://mtrifnjcunkalldkddvb.supabase.com',
+  url: 'https://mtrifnjcunkalldkddvb.supabase.co',
   anonKey: 'sb_publishable_yOfjjPkItn9jIl8tyUOVPg_An9XsFUI',
   /* بريد مستخدم المسؤول في Supabase Auth — يُستخدم داخلياً خلف
      شاشة الدخول الحالية (التي تطلب كلمة المرور فقط) */
