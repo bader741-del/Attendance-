@@ -6,8 +6,8 @@
    التخزين المحلي (localStorage) تماماً كما قبل الربط السحابي.
    ============================================================ */
 const SUPABASE_CONFIG = {
-  url: 'https://YOUR-PROJECT-REF.supabase.co',
-  anonKey: 'YOUR-ANON-PUBLIC-KEY',
+  url: 'https://mtrifnjcunkalldkddvb.supabase.com',
+  anonKey: 'sb_publishable_yOfjjPkItn9jIl8tyUOVPg_An9XsFUI',
   /* بريد مستخدم المسؤول في Supabase Auth — يُستخدم داخلياً خلف
      شاشة الدخول الحالية (التي تطلب كلمة المرور فقط) */
   adminEmail: 'admin@mksh.local',
