@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>اعتماد الجولات - منصة مراقبة الدوام</title>
+  <meta name="theme-color" content="#1a3a5c">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    /* حالات الجولة — الألوان المطلوبة: 🟡 بانتظار 🟢 معتمدة 🔴 مرفوضة */
+    .round-badge-pending  { background:#fff7e0; color:#b7791f; border:1px solid #f6d878; }
+    .round-badge-approved { background:var(--success-bg); color:var(--success); border:1px solid var(--success-border); }
+    .round-badge-rejected { background:var(--danger-bg);  color:var(--danger);  border:1px solid var(--danger-border); }
+    [data-theme="dark"] .round-badge-pending { background:rgba(246,216,120,.12); color:#f6d878; border-color:rgba(246,216,120,.35); }
+    .apv-counter { cursor:pointer; transition:transform .15s ease; }
+    .apv-counter:hover { transform:translateY(-2px); }
+    .apv-counter.active { outline:2.5px solid var(--secondary); outline-offset:2px; }
+    #apvTable tbody tr { cursor:pointer; }
+    .apv-returned-flag { font-size:11px; color:var(--warning); display:block; margin-top:3px; }
+  </style>
+</head>
+<body data-page="approvals">
+
+<!-- ===== شاشة الدخول (مدير المناوبة بكوده / المدير العام بجلسته) ===== -->
+<div class="login-overlay" id="apvLogin" style="display:none">
+  <div class="login-box">
+    <div class="login-icon" style="background:linear-gradient(135deg,#b7791f,#8e5d13)">
+      <i class="fas fa-stamp"></i>
+    </div>
+    <h2 class="login-title">اعتماد الجولات</h2>
+    <p class="login-desc">هذه الصفحة مخصصة لمدير المناوبة والمدير العام فقط</p>
+    <div class="login-error" id="apvLoginError">الكود غير صحيح أو غير مسجّل كمدير مناوبة</div>
+    <div class="form-group">
+      <label>كود مدير المناوبة <span class="required">*</span></label>
+      <input type="text" id="apvCodeInput" class="form-control" placeholder="أدخل الكود الخاص بك"
+             style="direction:ltr;text-align:center;font-size:18px;letter-spacing:2px;font-weight:700"
+             autocomplete="off" autocorrect="off" autocapitalize="characters">
+    </div>
+    <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:8px" onclick="ApprovalsApp.login()">
+      <i class="fas fa-sign-in-alt"></i> دخول
+    </button>
+    <div style="margin-top:14px;text-align:center;font-size:12.5px;color:var(--text-muted)">
+      المدير العام: سجّل دخولك من <a href="admin.html">لوحة المسؤول</a> ثم عد لهذه الصفحة
+    </div>
+    <div style="margin-top:12px;text-align:center">
+      <a href="index.html" style="font-size:13px;color:var(--text-light)"><i class="fas fa-arrow-right"></i> العودة للرئيسية</a>
+    </div>
+  </div>
+</div>
+
+<!-- ===== محتوى الصفحة ===== -->
+<div id="apvContent" style="display:none;min-height:100vh;background:var(--bg)">
+
+  <!-- الشريط العلوي -->
+  <div class="top-bar" style="position:sticky;top:0;z-index:50">
+    <div class="top-bar-right">
+      <span class="top-bar-title"><i class="fas fa-stamp" style="color:var(--secondary);margin-left:8px"></i>اعتماد الجولات</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <button class="btn btn-ghost btn-icon theme-toggle" title="الوضع الليلي / النهاري" onclick="Theme.toggle()">
+        <i class="fas fa-moon"></i>
+      </button>
+      <div style="display:flex;align-items:center;gap:7px;background:var(--success-bg);border:1px solid var(--success-border);border-radius:20px;padding:5px 12px;font-size:13px;color:var(--success);font-weight:600">
+        <span class="pulse-dot"></span>
+        <span id="apvUserName">—</span>
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="ApprovalsApp.logout()">
+        <i class="fas fa-sign-out-alt"></i> خروج
+      </button>
+    </div>
+  </div>
+
+  <div class="content-area" style="max-width:1300px;margin:0 auto">
+
+    <!-- العدادات -->
+    <div class="stat-cards" style="margin-top:20px">
+      <div class="stat-card orange apv-counter" id="apvCard-pending" onclick="ApprovalsApp.setStatusFilter('pending')">
+        <div class="stat-icon"><i class="fas fa-hourglass-half"></i></div>
+        <div class="stat-info"><div class="stat-value" id="apvCount-pending">0</div><div class="stat-label">بانتظار الاعتماد</div></div>
+      </div>
+      <div class="stat-card green apv-counter" id="apvCard-approved" onclick="ApprovalsApp.setStatusFilter('approved')">
+        <div class="stat-icon"><i class="fas fa-check-circle"></i></div>
+        <div class="stat-info"><div class="stat-value" id="apvCount-approved">0</div><div class="stat-label">جولات معتمدة</div></div>
+      </div>
+      <div class="stat-card red apv-counter" id="apvCard-rejected" onclick="ApprovalsApp.setStatusFilter('rejected')">
+        <div class="stat-icon"><i class="fas fa-ban"></i></div>
+        <div class="stat-info"><div class="stat-value" id="apvCount-rejected">0</div><div class="stat-label">جولات مرفوضة</div></div>
+      </div>
+      <div class="stat-card blue apv-counter" id="apvCard-all" onclick="ApprovalsApp.setStatusFilter('')">
+        <div class="stat-icon"><i class="fas fa-list-check"></i></div>
+        <div class="stat-info"><div class="stat-value" id="apvCount-all">0</div><div class="stat-label">جميع الجولات</div></div>
+      </div>
+    </div>
+
+    <!-- الفلاتر -->
+    <div class="filter-bar" style="margin:20px 0">
+      <div class="filter-group">
+        <label>التاريخ</label>
+        <input type="date" class="form-control" id="apvFilterDate" onchange="ApprovalsApp.render()">
+      </div>
+      <div class="filter-group">
+        <label>المستشفى</label>
+        <select class="form-control" id="apvFilterHospital" onchange="ApprovalsApp.render()">
+          <option value="">الكل</option>
+          <option>مستشفى الطب النفسي</option>
+          <option>مستشفى النساء والأطفال</option>
+          <option>مستشفى المدينة الرئيسي</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>الفترة</label>
+        <select class="form-control" id="apvFilterPeriod" onchange="ApprovalsApp.render()">
+          <option value="">الكل</option>
+          <option>صباحي</option><option>مسائي</option><option>ليلي</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>بحث</label>
+        <input type="text" class="form-control" id="apvFilterSearch" placeholder="اسم موظف أو قسم..." oninput="ApprovalsApp.render()">
+      </div>
+      <div class="filter-actions">
+        <button class="btn btn-outline btn-sm" onclick="ApprovalsApp.resetFilters()"><i class="fas fa-undo"></i> إعادة</button>
+        <button class="btn btn-primary btn-sm" onclick="ApprovalsApp.reload()"><i class="fas fa-rotate"></i> تحديث</button>
+      </div>
+    </div>
+
+    <!-- جدول الجولات -->
+    <div class="table-wrapper" style="margin-bottom:30px">
+      <div class="table-header">
+        <span class="table-title"><i class="fas fa-clipboard-check" style="color:var(--secondary);margin-left:8px"></i>الجولات المدخلة
+          <span id="apvTableCount" style="font-size:13px;color:var(--text-muted);font-weight:400"></span>
+        </span>
+      </div>
+      <div class="table-overflow">
+        <table class="data-table" id="apvTable">
+          <thead><tr>
+            <th>رقم الجولة</th><th>التاريخ</th><th>اليوم</th><th>الفترة</th><th>المستشفى</th>
+            <th>القسم</th><th>اسم الموظف</th><th>وقت الإدخال</th><th>حالة الجولة</th>
+          </tr></thead>
+          <tbody id="apvBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== مودال تفاصيل الجولة ===== -->
+<div class="modal-overlay" id="apvDetailModal">
+  <div class="modal-box modal-lg">
+    <div class="modal-header">
+      <span class="modal-title"><i class="fas fa-file-alt" style="color:var(--secondary)"></i> تفاصيل الجولة <span id="apvDetailNo" style="color:var(--text-muted);font-size:13px"></span></span>
+      <button class="modal-close" onclick="ApprovalsApp.closeModal('apvDetailModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body" id="apvDetailBody"></div>
+  </div>
+</div>
+
+<!-- ===== مودال الاعتماد (توقيع إلزامي) ===== -->
+<div class="modal-overlay" id="apvApproveModal">
+  <div class="modal-box modal-sm">
+    <div class="modal-header">
+      <span class="modal-title"><i class="fas fa-file-signature" style="color:var(--success)"></i> اعتماد الجولة</span>
+      <button class="modal-close" onclick="ApprovalsApp.closeModal('apvApproveModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="apvApproveId">
+      <p style="font-size:13.5px;color:var(--text-light);margin-bottom:12px">
+        ارسم توقيعك الإلكتروني داخل المربع — سيُسجَّل مع اسمك وتاريخ ووقت الاعتماد.
+      </p>
+      <canvas id="apvSigCanvas" width="440" height="150" class="sig-canvas" style="width:100%;touch-action:none"></canvas>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-outline btn-sm" onclick="ApprovalsApp.clearSignature()"><i class="fas fa-eraser"></i> مسح التوقيع</button>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="ApprovalsApp.closeModal('apvApproveModal')">إلغاء</button>
+      <button class="btn btn-success" id="apvApproveBtn" onclick="ApprovalsApp.confirmApprove()"><i class="fas fa-check"></i> اعتماد الجولة</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== مودال الرفض (سبب إلزامي) ===== -->
+<div class="modal-overlay" id="apvRejectModal">
+  <div class="modal-box modal-sm">
+    <div class="modal-header">
+      <span class="modal-title"><i class="fas fa-times-circle" style="color:var(--danger)"></i> رفض الجولة</span>
+      <button class="modal-close" onclick="ApprovalsApp.closeModal('apvRejectModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="apvRejectId">
+      <div class="form-group">
+        <label>سبب الرفض <span class="required">*</span></label>
+        <textarea class="form-control" id="apvRejectReason" rows="4" placeholder="اكتب سبب رفض الجولة (إلزامي)..."></textarea>
+        <div class="form-hint">سيعود السجل إلى الموظف للتعديل، وبعد التعديل تعود الحالة تلقائياً إلى "بانتظار الاعتماد".</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="ApprovalsApp.closeModal('apvRejectModal')">إلغاء</button>
+      <button class="btn btn-danger" id="apvRejectBtn" onclick="ApprovalsApp.confirmReject()"><i class="fas fa-ban"></i> رفض الجولة</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== مودال الإرجاع للموظف ===== -->
+<div class="modal-overlay" id="apvReturnModal">
+  <div class="modal-box modal-sm">
+    <div class="modal-header">
+      <span class="modal-title"><i class="fas fa-rotate-right" style="color:var(--warning)"></i> رجوع للموظف لإعادة التعديل</span>
+      <button class="modal-close" onclick="ApprovalsApp.closeModal('apvReturnModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="apvReturnId">
+      <div class="form-group">
+        <label>ملاحظة للموظف (اختياري)</label>
+        <textarea class="form-control" id="apvReturnNote" rows="3" placeholder="ما المطلوب تعديله؟"></textarea>
+        <div class="form-hint">تبقى الجولة "بانتظار الاعتماد" مع علامة إعادة للتعديل تظهر للموظف.</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="ApprovalsApp.closeModal('apvReturnModal')">إلغاء</button>
+      <button class="btn btn-warning" id="apvReturnBtn" style="background:var(--warning);color:#fff;border:none" onclick="ApprovalsApp.confirmReturn()"><i class="fas fa-rotate-right"></i> إرجاع للموظف</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="script.js"></script>
+<script src="approvals.js"></script>
+</body>
+</html>

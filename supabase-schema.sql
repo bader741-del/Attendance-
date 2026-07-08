@@ -254,3 +254,11 @@ grant execute on function submit_report(text, jsonb) to anon, authenticated;
 -- insert into admin_users (user_id, note)
 --   select id, 'المسؤول الرئيسي' from auth.users where email = 'admin@mksh.local'
 --   on conflict (user_id) do nothing;
+
+-- ============================================================
+-- بعد تنفيذ هذا الملف: نفّذ أيضاً ملفي نظام اعتماد الجولات بالترتيب:
+--   1) supabase-approvals-migration.sql
+--      (حقول الاعتماد، جدول مدراء المناوبة، دوال الاعتماد/الرفض/الإرجاع)
+--   2) supabase-rounds-migration.sql
+--      (جولة متعددة الأقسام: rounds + round_sections + اعتماد الجولة كاملة)
+-- ============================================================

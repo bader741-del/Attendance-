@@ -85,8 +85,15 @@
       <div class="nav-item" data-section="departments" onclick="AdminApp.showSection('departments')">
         <i class="fas fa-sitemap"></i> إدارة الأقسام
       </div>
+      <div class="nav-item" data-section="managers" onclick="AdminApp.showSection('managers')">
+        <i class="fas fa-user-tie"></i> مدراء المناوبة
+      </div>
 
       <span class="nav-section-label">التقارير</span>
+      <!-- نظام اعتماد الجولات (صفحة مستقلة — مدير المناوبة والمدير العام) -->
+      <div class="nav-item" onclick="location.href='approvals.html'">
+        <i class="fas fa-stamp"></i> اعتماد الجولات
+      </div>
       <div class="nav-item" data-section="reports" onclick="AdminApp.showSection('reports')">
         <i class="fas fa-clipboard-list"></i> سجل التقارير
         <span class="badge-count" id="pendingBadge" style="display:none">0</span>
@@ -263,6 +270,27 @@
           <div class="stat-card teal">
             <div class="stat-icon"><i class="fas fa-file-circle-check"></i></div>
             <div class="stat-info"><div class="stat-value" id="stat-reports">0</div><div class="stat-label">إجمالي التقارير</div></div>
+          </div>
+        </div>
+
+        <!-- بطاقات اعتماد الجولات -->
+        <div class="kpi-section-title" style="margin-top:6px"><i class="fas fa-stamp"></i> اعتماد الجولات</div>
+        <div class="stat-cards" id="roundsCards">
+          <div class="stat-card green" style="cursor:pointer" onclick="location.href='approvals.html'">
+            <div class="stat-icon"><i class="fas fa-check-circle"></i></div>
+            <div class="stat-info"><div class="stat-value" id="stat-roundsApproved">0</div><div class="stat-label">الجولات المعتمدة</div></div>
+          </div>
+          <div class="stat-card orange" style="cursor:pointer" onclick="location.href='approvals.html'">
+            <div class="stat-icon"><i class="fas fa-hourglass-half"></i></div>
+            <div class="stat-info"><div class="stat-value" id="stat-roundsPending">0</div><div class="stat-label">الجولات قيد الاعتماد</div></div>
+          </div>
+          <div class="stat-card red" style="cursor:pointer" onclick="location.href='approvals.html'">
+            <div class="stat-icon"><i class="fas fa-ban"></i></div>
+            <div class="stat-info"><div class="stat-value" id="stat-roundsRejected">0</div><div class="stat-label">الجولات المرفوضة</div></div>
+          </div>
+          <div class="stat-card blue" style="cursor:pointer" onclick="location.href='approvals.html'">
+            <div class="stat-icon"><i class="fas fa-percentage"></i></div>
+            <div class="stat-info"><div class="stat-value" id="stat-approvalRate">0%</div><div class="stat-label">نسبة الاعتماد</div></div>
           </div>
         </div>
 
@@ -477,6 +505,32 @@
         </div>
       </div>
 
+      <!-- ===== قسم مدراء المناوبة ===== -->
+      <div class="section-content" id="sec-managers">
+        <div class="table-wrapper">
+          <div class="table-header">
+            <span class="table-title"><i class="fas fa-user-tie" style="color:var(--secondary);margin-left:8px"></i>مدراء المناوبة</span>
+            <div class="table-actions">
+              <button class="btn btn-primary btn-sm" onclick="AdminApp.openMgrModal()">
+                <i class="fas fa-plus"></i> إضافة مدير مناوبة
+              </button>
+            </div>
+          </div>
+          <div style="padding:12px 18px;font-size:13px;color:var(--text-light);border-bottom:1px solid var(--border)">
+            <i class="fas fa-info-circle"></i>
+            يدخل مدير المناوبة إلى صفحة <a href="approvals.html">اعتماد الجولات</a> بالكود الخاص به لاعتماد أو رفض أو إرجاع الجولات.
+          </div>
+          <div class="table-overflow">
+            <table class="data-table">
+              <thead><tr>
+                <th>#</th><th>اسم مدير المناوبة</th><th>الكود الخاص</th><th>تاريخ الإضافة</th><th>الإجراءات</th>
+              </tr></thead>
+              <tbody id="managersBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
       <!-- ===== قسم سجل التقارير ===== -->
       <div class="section-content" id="sec-reports">
         <div class="filter-bar">
@@ -545,6 +599,12 @@
             <span class="content-card-title"><i class="fas fa-calendar-day" style="color:var(--secondary)"></i> التقرير اليومي</span>
             <div style="display:flex;gap:10px;flex-wrap:wrap">
               <input type="date" class="form-control" id="dailyDate" style="width:auto" onchange="AdminApp.renderDailyReport()">
+              <select class="form-control" id="dailyStatus" style="width:auto" onchange="AdminApp.renderDailyReport()" title="حالة الجولات المعروضة">
+                <option value="approved" selected>المعتمدة فقط (افتراضي)</option>
+                <option value="">جميع الحالات</option>
+                <option value="pending">بانتظار الاعتماد</option>
+                <option value="rejected">المرفوضة</option>
+              </select>
               <button class="btn btn-success btn-sm" onclick="AdminApp.exportReports('daily')"><i class="fas fa-file-excel"></i> تصدير Excel</button>
               <button class="btn btn-outline btn-sm" onclick="AdminApp.printReport('daily')"><i class="fas fa-print"></i> طباعة / PDF</button>
             </div>
@@ -565,6 +625,12 @@
                 <label>إلى:</label>
                 <input type="date" class="form-control" id="weeklyTo" style="width:auto" onchange="AdminApp.renderWeeklyReport()">
               </div>
+              <select class="form-control" id="weeklyStatus" style="width:auto" onchange="AdminApp.renderWeeklyReport()" title="حالة الجولات المعروضة">
+                <option value="approved" selected>المعتمدة فقط (افتراضي)</option>
+                <option value="">جميع الحالات</option>
+                <option value="pending">بانتظار الاعتماد</option>
+                <option value="rejected">المرفوضة</option>
+              </select>
               <button class="btn btn-success btn-sm" onclick="AdminApp.exportReports('weekly')"><i class="fas fa-file-excel"></i> تصدير Excel</button>
               <button class="btn btn-outline btn-sm" onclick="AdminApp.printReport('weekly')"><i class="fas fa-print"></i> طباعة / PDF</button>
             </div>
@@ -583,6 +649,12 @@
                 <label>الشهر:</label>
                 <input type="month" class="form-control" id="monthlyMonth" style="width:auto" onchange="AdminApp.renderMonthlyReport()">
               </div>
+              <select class="form-control" id="monthlyStatus" style="width:auto" onchange="AdminApp.renderMonthlyReport()" title="حالة الجولات المعروضة">
+                <option value="approved" selected>المعتمدة فقط (افتراضي)</option>
+                <option value="">جميع الحالات</option>
+                <option value="pending">بانتظار الاعتماد</option>
+                <option value="rejected">المرفوضة</option>
+              </select>
               <button class="btn btn-success btn-sm" onclick="AdminApp.exportReports('monthly')"><i class="fas fa-file-excel"></i> تصدير Excel</button>
               <button class="btn btn-outline btn-sm" onclick="AdminApp.printReport('monthly')"><i class="fas fa-print"></i> طباعة / PDF</button>
             </div>
@@ -747,6 +819,35 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="AdminApp.closeModal('empModal')">إلغاء</button>
       <button class="btn btn-primary" onclick="AdminApp.saveEmployee()"><i class="fas fa-save"></i> حفظ</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== مودال مدير المناوبة ===== -->
+<div class="modal-overlay" id="mgrModal">
+  <div class="modal-box modal-sm">
+    <div class="modal-header">
+      <span class="modal-title" id="mgrModalTitle">إضافة مدير مناوبة</span>
+      <button class="modal-close" onclick="AdminApp.closeModal('mgrModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="mgrEditId">
+      <div class="form-group">
+        <label>اسم مدير المناوبة <span class="required">*</span></label>
+        <input type="text" class="form-control" id="mgrName" placeholder="أدخل الاسم الكامل">
+      </div>
+      <div class="form-group">
+        <label>الكود الخاص <span class="required">*</span></label>
+        <div style="display:flex;gap:8px">
+          <input type="text" class="form-control" id="mgrCode" placeholder="مثال: MGR001" style="direction:ltr">
+          <button class="btn btn-outline btn-sm" onclick="AdminApp.generateMgrCode()" style="white-space:nowrap"><i class="fas fa-magic"></i> توليد</button>
+        </div>
+        <div class="form-hint">يستخدمه مدير المناوبة للدخول إلى صفحة اعتماد الجولات</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="AdminApp.closeModal('mgrModal')">إلغاء</button>
+      <button class="btn btn-primary" onclick="AdminApp.saveManager()"><i class="fas fa-save"></i> حفظ</button>
     </div>
   </div>
 </div>

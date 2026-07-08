@@ -138,24 +138,62 @@ const DB = {
   /* ---- موظفون ---- */
   getEmployees()   { return this._get(this._k.emps, []); },
   _saveEmps(arr)   { this._set(this._k.emps, arr); },
-  addEmployee(data) {
+  async addEmployee(data) {
     const emps = this.getEmployees();
     if (emps.some(e => e.code === data.code)) return { ok: false, msg: 'الكود مستخدم بالفعل' };
-    emps.push({ ...data, id: this._uid(), createdAt: this._now() });
+    const rec = { ...data, id: this._uid(), createdAt: this._now() };
+
+    /* ---- السحابة مفعّلة: الحفظ في Supabase أولاً (بانتظار النتيجة) ---- */
+    if (Cloud.on()) {
+      const row = Sync.toCloud('employees', rec); // { client_id, name, code } — مطابق لأعمدة الجدول
+      const { data: inserted, error } = await Cloud.sb.from('employees').insert(row).select();
+      if (error) {
+        console.error('[موظفون] فشل حفظ الموظف في جدول employees بـ Supabase:', error.message, error);
+        const msg = error.code === '23505'
+          ? 'الكود مستخدم بالفعل في قاعدة البيانات'
+          : 'فشل الحفظ في قاعدة البيانات — راجع Console (غالباً: جلسة الدخول غير فعّالة أو المستخدم ليس في admin_users / سياسات RLS)';
+        return { ok: false, msg };
+      }
+      console.log('[موظفون] تم الحفظ في Supabase بنجاح:', inserted);
+      this.audit('إضافة موظف', `${data.name} (${data.code})`);
+      /* إعادة تحميل القائمة من Supabase (وليس من localStorage) */
+      const pulled = await Sync.pullEmployees();
+      if (!pulled) { emps.push(rec); this._saveEmps(emps); } // بديل مؤقت إن تعذّر السحب
+      return { ok: true };
+    }
+
+    /* ---- وضع محلي فقط (Supabase غير مفعّل في config.js) ---- */
+    console.warn('[موظفون] Supabase غير مرتبط — الحفظ في localStorage فقط ولن يصل شيء لقاعدة البيانات.');
+    emps.push(rec);
     this._saveEmps(emps);
     this.audit('إضافة موظف', `${data.name} (${data.code})`);
-    Sync.up('employees', emps[emps.length - 1]);
     return { ok: true };
   },
-  updateEmployee(id, data) {
+  async updateEmployee(id, data) {
     const emps = this.getEmployees();
     if (emps.some(e => e.code === data.code && e.id !== id)) return { ok: false, msg: 'الكود مستخدم بالفعل' };
     const idx = emps.findIndex(e => e.id === id);
     if (idx < 0) return { ok: false, msg: 'الموظف غير موجود' };
     emps[idx] = { ...emps[idx], ...data };
+
+    /* ---- السحابة مفعّلة: التحديث في Supabase مباشرة (بانتظار النتيجة) ---- */
+    if (Cloud.on()) {
+      const { name, code } = data;
+      const { data: updated, error } = await Cloud.sb.from('employees')
+        .update({ name, code }).eq('client_id', id).select();
+      if (error) {
+        console.error('[موظفون] فشل تحديث الموظف في جدول employees بـ Supabase:', error.message, error);
+        return { ok: false, msg: 'فشل التحديث في قاعدة البيانات — راجع Console' };
+      }
+      if (!updated?.length) console.warn('[موظفون] UPDATE لم يطابق أي صف (client_id غير موجود بالسحابة أو منعته سياسات RLS):', id);
+      this.audit('تعديل موظف', `${data.name} (${data.code})`);
+      const pulled = await Sync.pullEmployees();
+      if (!pulled) this._saveEmps(emps);
+      return { ok: true };
+    }
+
     this._saveEmps(emps);
     this.audit('تعديل موظف', `${data.name} (${data.code})`);
-    Sync.up('employees', emps[idx]);
     return { ok: true };
   },
   deleteEmployee(id)   {
@@ -310,8 +348,13 @@ const Sync = {
       status: 'status', rejectionReason: 'rejection_reason', approvedBy: 'approved_by',
       approverTitle: 'approver_title', sigId: 'sig_id', createdAt: 'created_at',
       approvedAt: 'approved_at', rejectedAt: 'rejected_at',
+      /* حقول نظام اعتماد الجولات (supabase-approvals-migration.sql) */
+      approvalSignature: 'approval_signature', returnedForEdit: 'returned_for_edit',
+      returnNote: 'return_note',
     },
-    employees:   { id: 'client_id', name: 'name', code: 'code', hospital: 'hospital', createdAt: 'created_at' },
+    /* مطابقة تامة لأعمدة جدول employees في Supabase: id, client_id, name, code
+       (id يولَّد من قاعدة البيانات — لا يُرسل من العميل) */
+    employees:   { id: 'client_id', name: 'name', code: 'code' },
     departments: { id: 'client_id', name: 'name', hospital: 'hospital', createdAt: 'created_at' },
     shifts:      { id: 'client_id', hospital: 'hospital', department: 'department', period: 'period', requiredCount: 'required_count', createdAt: 'created_at' },
   },
@@ -435,6 +478,7 @@ const Sync = {
           if (error) throw error;
         } catch (e) {
           op.attempts = (op.attempts || 0) + 1;
+          console.error(`[مزامنة] فشل تنفيذ عملية "${op.kind}" على جدول "${op.table || '-'}" (محاولة ${op.attempts}/25):`, e?.message || e, e);
           if (op.attempts < 25) remaining.push(op); // تجاهل العملية بعد 25 محاولة فاشلة
         }
       }
@@ -445,6 +489,26 @@ const Sync = {
   },
 
   /* ---- السحب من السحابة ---- */
+  /* سحب قائمة الموظفين من Supabase وجعلها مصدر الحقيقة للنسخة المحلية */
+  async pullEmployees() {
+    if (!Cloud.on()) return false;
+    try {
+      const { data, error } = await Cloud.sb.from('employees').select('id, client_id, name, code');
+      if (error) {
+        console.error('[موظفون] فشل تحميل قائمة الموظفين من Supabase:', error.message, error);
+        return false;
+      }
+      DB._set(DB._k.emps, (data || []).map(r => ({
+        ...this.fromCloud('employees', r),
+        id: r.client_id || r.id, // صفوف أُنشئت من لوحة Supabase مباشرة قد لا تحمل client_id
+      })));
+      return true;
+    } catch (e) {
+      console.error('[موظفون] خطأ شبكة أثناء تحميل الموظفين من Supabase:', e);
+      return false;
+    }
+  },
+
   async pullDepartments() {
     if (!Cloud.on()) return;
     try {
@@ -677,7 +741,7 @@ const AdminApp = {
 
     const titles = {
       dashboard: 'لوحة التحكم', analytics: 'التحليلات الذكية', employees: 'أكواد الموظفين', shifts: 'جداول الدوام',
-      departments: 'إدارة الأقسام', reports: 'سجل التقارير',
+      departments: 'إدارة الأقسام', managers: 'مدراء المناوبة', reports: 'سجل التقارير',
       daily: 'التقرير اليومي', weekly: 'التقرير الأسبوعي', monthly: 'التقرير الشهري',
       audit: 'سجل التدقيق',
       settings: 'الإعدادات',
@@ -691,6 +755,7 @@ const AdminApp = {
       employees:   () => this.renderEmployees(),
       shifts:      () => this.renderShifts(),
       departments: () => this.renderDepts(),
+      managers:    () => this.renderManagers(),
       reports:     () => this.renderReports(),
       daily:       () => this.renderDailyReport(),
       weekly:      () => this.renderWeeklyReport(),
@@ -751,6 +816,17 @@ const AdminApp = {
     document.getElementById('stat-withdrawn').textContent = totals.withdrawn;
     document.getElementById('stat-leave').textContent     = totals.leave;
     document.getElementById('stat-reports').textContent   = reports.length;
+
+    // بطاقات اعتماد الجولات (معتمدة / قيد الاعتماد / مرفوضة / نسبة الاعتماد)
+    const rApproved = reports.filter(r => r.status === 'approved').length;
+    const rPending  = reports.filter(r => r.status === 'pending').length;
+    const rRejected = reports.filter(r => r.status === 'rejected').length;
+    const rateEl = document.getElementById('stat-approvalRate');
+    const setTxt = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    setTxt('stat-roundsApproved', rApproved);
+    setTxt('stat-roundsPending',  rPending);
+    setTxt('stat-roundsRejected', rRejected);
+    if (rateEl) rateEl.textContent = reports.length ? Math.round((rApproved / reports.length) * 100) + '%' : '0%';
 
     // ملخص التقارير
     const rSummary = document.getElementById('reportsSummaryTable');
@@ -1214,7 +1290,12 @@ const AdminApp = {
   },
 
   /* ====== موظفون ====== */
-  renderEmployees() {
+  renderEmployees(fromCloudRefresh = false) {
+    /* عند تفعيل السحابة: إعادة تحميل القائمة من Supabase (وليس من localStorage)
+       ثم إعادة الرسم — النسخة المحلية تُعرض فوراً ريثما يصل الرد */
+    if (Cloud.on() && !fromCloudRefresh) {
+      Sync.pullEmployees().then(ok => { if (ok) this.renderEmployees(true); });
+    }
     const search = (document.getElementById('empSearchInput')?.value || '').toLowerCase();
     let emps = DB.getEmployees();
     if (search) emps = emps.filter(e => e.name.toLowerCase().includes(search) || e.code.toLowerCase().includes(search));
@@ -1252,7 +1333,7 @@ const AdminApp = {
     if (emp) this.openEmpModal(emp);
   },
 
-  saveEmployee() {
+  async saveEmployee() {
     const id   = document.getElementById('empEditId').value;
     const name = document.getElementById('empName').value.trim();
     const code = document.getElementById('empCode').value.trim().toUpperCase();
@@ -1262,14 +1343,15 @@ const AdminApp = {
     if (!code) return Toast.show('يرجى إدخال الكود الخاص', 'error');
     if (!/^[A-Z0-9\-_]+$/i.test(code)) return Toast.show('الكود يجب أن يحتوي على حروف وأرقام فقط', 'error');
 
+    /* الحفظ في Supabase بانتظار النتيجة — ثم إعادة تحميل القائمة من قاعدة البيانات */
     const result = id
-      ? DB.updateEmployee(id, { name, code, hospital })
-      : DB.addEmployee({ name, code, hospital });
+      ? await DB.updateEmployee(id, { name, code, hospital })
+      : await DB.addEmployee({ name, code, hospital });
 
     if (!result.ok) return Toast.show(result.msg, 'error');
     Toast.show(id ? 'تم تحديث بيانات الموظف' : 'تمت إضافة الموظف بنجاح', 'success');
     this.closeModal('empModal');
-    this.renderEmployees();
+    this.renderEmployees(); // تُرسم من النسخة المُعاد تحميلها من Supabase
   },
 
   deleteEmployee(id, name) {
@@ -1399,6 +1481,93 @@ const AdminApp = {
       DB.deleteDepartment(id);
       Toast.show('تم حذف القسم', 'success');
       this.renderDepts();
+    });
+  },
+
+  /* ====== مدراء المناوبة (البيانات من Supabase مباشرة — لا تخزين محلي) ====== */
+  _managers: [],
+
+  async renderManagers() {
+    const tbody = document.getElementById('managersBody');
+    if (!tbody) return;
+    if (!Cloud.on()) {
+      tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><i class="fas fa-cloud"></i><p>إدارة مدراء المناوبة تتطلب ربط Supabase (config.js) وتنفيذ ملف supabase-approvals-migration.sql</p></div></td></tr>`;
+      return;
+    }
+    const { data, error } = await Cloud.sb.from('duty_managers').select('*').order('created_at');
+    if (error) {
+      console.error('[مدراء المناوبة] فشل التحميل:', error);
+      tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><i class="fas fa-triangle-exclamation"></i><p>فشل التحميل — تأكد من تنفيذ ملف supabase-approvals-migration.sql في SQL Editor</p></div></td></tr>`;
+      return;
+    }
+    this._managers = data || [];
+    if (!this._managers.length) {
+      tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><i class="fas fa-user-tie"></i><p>لم يتم إضافة مدراء مناوبة بعد</p></div></td></tr>`;
+      return;
+    }
+    tbody.innerHTML = this._managers.map((m, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td><strong>${esc(m.name)}</strong></td>
+        <td><code style="background:#f0f4f8;padding:3px 10px;border-radius:6px;font-size:13px;letter-spacing:1px">${esc(m.code)}</code></td>
+        <td style="font-size:13px;color:var(--text-muted)">${DB.formatDate(m.created_at)}</td>
+        <td><div class="actions">
+          <button class="btn btn-outline btn-sm btn-icon" title="تعديل" onclick="AdminApp.editManager('${esc(m.id)}')"><i class="fas fa-edit"></i></button>
+          <button class="btn btn-danger btn-sm btn-icon" title="حذف" onclick="AdminApp.deleteManager('${esc(m.id)}')"><i class="fas fa-trash"></i></button>
+        </div></td>
+      </tr>`).join('');
+  },
+
+  openMgrModal(mgr) {
+    document.getElementById('mgrEditId').value = mgr?.id || '';
+    document.getElementById('mgrName').value = mgr?.name || '';
+    document.getElementById('mgrCode').value = mgr?.code || '';
+    document.getElementById('mgrModalTitle').textContent = mgr ? 'تعديل مدير المناوبة' : 'إضافة مدير مناوبة';
+    this.openModal('mgrModal');
+  },
+
+  editManager(id) {
+    const m = this._managers.find(x => x.id === id);
+    if (m) this.openMgrModal(m);
+  },
+
+  generateMgrCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = 'MGR';
+    for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    document.getElementById('mgrCode').value = code;
+  },
+
+  async saveManager() {
+    const id   = document.getElementById('mgrEditId').value;
+    const name = document.getElementById('mgrName').value.trim();
+    const code = document.getElementById('mgrCode').value.trim().toUpperCase();
+    if (!name) return Toast.show('يرجى إدخال اسم مدير المناوبة', 'error');
+    if (!code) return Toast.show('يرجى إدخال الكود الخاص', 'error');
+    if (!/^[A-Z0-9\-_]+$/i.test(code)) return Toast.show('الكود يجب أن يحتوي على حروف وأرقام فقط', 'error');
+    if (!Cloud.on()) return Toast.show('يتطلب ربط Supabase', 'error');
+
+    const { error } = id
+      ? await Cloud.sb.from('duty_managers').update({ name, code }).eq('id', id)
+      : await Cloud.sb.from('duty_managers').insert({ client_id: DB._uid(), name, code });
+    if (error) {
+      console.error('[مدراء المناوبة] فشل الحفظ:', error);
+      return Toast.show(error.code === '23505' ? 'الكود مستخدم بالفعل' : 'فشل الحفظ في قاعدة البيانات — راجع Console', 'error');
+    }
+    DB.audit(id ? 'تعديل مدير مناوبة' : 'إضافة مدير مناوبة', `${name} (${code})`);
+    Toast.show(id ? 'تم تحديث بيانات مدير المناوبة' : 'تمت إضافة مدير المناوبة بنجاح', 'success');
+    this.closeModal('mgrModal');
+    this.renderManagers();
+  },
+
+  deleteManager(id) {
+    const m = this._managers.find(x => x.id === id);
+    this._confirm(`هل تريد حذف مدير المناوبة "${m?.name || ''}"؟`, async () => {
+      const { error } = await Cloud.sb.from('duty_managers').delete().eq('id', id);
+      if (error) return Toast.show('فشل الحذف — راجع Console', 'error');
+      DB.audit('حذف مدير مناوبة', `${m?.name || ''} (${m?.code || ''})`);
+      Toast.show('تم حذف مدير المناوبة', 'success');
+      this.renderManagers();
     });
   },
 
@@ -1634,11 +1803,17 @@ const AdminApp = {
       </div>`;
   },
 
+  /* فلتر حالة الجولات للتقارير الدورية — الافتراضي: المعتمدة فقط */
+  _applyStatusFilter(reports, selectId) {
+    const status = document.getElementById(selectId)?.value ?? 'approved';
+    return status ? reports.filter(r => r.status === status) : reports;
+  },
+
   renderDailyReport() {
     const date = document.getElementById('dailyDate')?.value;
     const body = document.getElementById('dailyReportBody');
     if (!body) return;
-    const reports = DB.getReports().filter(r => r.date === date);
+    const reports = this._applyStatusFilter(DB.getReports().filter(r => r.date === date), 'dailyStatus');
     body.innerHTML = this._buildReportTable(reports);
   },
 
@@ -1647,7 +1822,8 @@ const AdminApp = {
     const to   = document.getElementById('weeklyTo')?.value;
     const body = document.getElementById('weeklyReportBody');
     if (!body) return;
-    const reports = DB.getReports().filter(r => (!from || r.date >= from) && (!to || r.date <= to));
+    const reports = this._applyStatusFilter(
+      DB.getReports().filter(r => (!from || r.date >= from) && (!to || r.date <= to)), 'weeklyStatus');
     body.innerHTML = this._buildReportTable(reports);
   },
 
@@ -1655,7 +1831,8 @@ const AdminApp = {
     const month = document.getElementById('monthlyMonth')?.value;
     const body = document.getElementById('monthlyReportBody');
     if (!body) return;
-    const reports = DB.getReports().filter(r => month && r.date.startsWith(month));
+    const reports = this._applyStatusFilter(
+      DB.getReports().filter(r => month && r.date.startsWith(month)), 'monthlyStatus');
     body.innerHTML = this._buildReportTable(reports);
   },
 
@@ -1666,16 +1843,16 @@ const AdminApp = {
 
     if (type === 'daily') {
       const date = document.getElementById('dailyDate')?.value;
-      reports = reports.filter(r => r.date === date);
+      reports = this._applyStatusFilter(reports.filter(r => r.date === date), 'dailyStatus');
       filename = `تقرير_يومي_${date}`;
     } else if (type === 'weekly') {
       const from = document.getElementById('weeklyFrom')?.value;
       const to   = document.getElementById('weeklyTo')?.value;
-      reports = reports.filter(r => (!from || r.date >= from) && (!to || r.date <= to));
+      reports = this._applyStatusFilter(reports.filter(r => (!from || r.date >= from) && (!to || r.date <= to)), 'weeklyStatus');
       filename = `تقرير_اسبوعي_${from}_${to}`;
     } else if (type === 'monthly') {
       const month = document.getElementById('monthlyMonth')?.value;
-      reports = reports.filter(r => month && r.date.startsWith(month));
+      reports = this._applyStatusFilter(reports.filter(r => month && r.date.startsWith(month)), 'monthlyStatus');
       filename = `تقرير_شهري_${month}`;
     } else {
       // apply current filters
@@ -1790,6 +1967,8 @@ const AdminApp = {
    ====================================================== */
 const EmployeeApp = {
   currentEmployee: null,
+  editingId: null,   // معرّف الجولة الجاري تعديلها (مرفوضة/مُعادة)
+  _myRounds: [],
 
   init() {
     // إغلاق modal بالضغط خارجه
@@ -1868,12 +2047,271 @@ const EmployeeApp = {
       dateEl.value = DB.today();
       document.getElementById('repDay').value = DB.getDayName(dateEl.value);
     }
+    // تهيئة نموذج الجولة متعددة الأقسام: بطاقة قسم أولى + لوحة توقيع المدير المناوب
+    if (document.getElementById('roundSections')) {
+      if (!document.querySelectorAll('#roundSections .emp-section-card').length) this.addSection();
+      this._initRoundSigPad();
+      this._setEditMode(false);
+      this.loadManagersList();
+      // قسم "اعتماد الجولة" يظهر تلقائياً فقط بعد اكتمال إدخال جميع الأقسام
+      const form = document.getElementById('empMainForm');
+      if (form && !form._roundWatch) {
+        form._roundWatch = true;
+        form.addEventListener('input',  () => this.checkRoundComplete());
+        form.addEventListener('change', () => this.checkRoundComplete());
+      }
+      this.checkRoundComplete();
+    }
+    this.loadMyRounds();
   },
 
+  /* ====== قائمة أسماء المدراء المناوبين (أسماء فقط — من Supabase) ====== */
+  async loadManagersList() {
+    const select = document.getElementById('mgrApprovalName');
+    if (!select || !Cloud.on()) return;
+    try {
+      const { data, error } = await Cloud.sb.rpc('list_duty_managers');
+      if (error) throw error;
+      const prev = select.value;
+      select.innerHTML = '<option value="">-- اختر المدير المناوب --</option>';
+      (data || []).forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.name; opt.textContent = m.name;
+        if (m.name === prev) opt.selected = true;
+        select.appendChild(opt);
+      });
+    } catch (e) {
+      console.warn('[بوابة الموظف] تعذر تحميل قائمة المدراء المناوبين (هل نُفّذ ملف supabase-rounds-migration.sql؟):', e?.message || e);
+    }
+  },
+
+  /* ====== إظهار قسم "اعتماد الجولة" فقط بعد اكتمال إدخال جميع الأقسام ====== */
+  _roundLocked: false,
+
+  isRoundComplete() {
+    const date     = document.getElementById('repDate')?.value;
+    const period   = document.getElementById('repPeriod')?.value;
+    const hospital = document.getElementById('repHospital')?.value;
+    if (!date || !period || !hospital) return false;
+    return this._collectSections().ok;
+  },
+
+  checkRoundComplete() {
+    const block = document.getElementById('roundApprovalBlock');
+    const hint  = document.getElementById('approvalHint');
+    if (!block) return;
+    if (this._roundLocked || this.editingId) {
+      block.style.display = 'none';
+      if (hint) hint.style.display = 'none';
+      return;
+    }
+    if (this._roundApproval) return; // معتمدة قبل الحفظ — يبقى القسم ظاهراً بحالته الخضراء
+    const complete = this.isRoundComplete();
+    block.style.display = complete ? '' : 'none';
+    if (hint) hint.style.display = complete ? 'none' : '';
+  },
+
+  /* ====== جولاتي المرفوضة / المُعادة للتعديل ====== */
+  async loadMyRounds() {
+    const panel = document.getElementById('empMyRounds');
+    const list  = document.getElementById('empMyRoundsList');
+    if (!panel || !list || !this.currentEmployee) return;
+
+    let rounds = [];
+    if (Cloud.on() && navigator.onLine !== false) {
+      try {
+        const { data, error } = await Cloud.sb.rpc('get_my_reports', { p_code: this.currentEmployee.code });
+        if (!error && Array.isArray(data)) {
+          rounds = data.map(r => ({
+            id: r.client_id || r.id, date: r.date, day: r.day, period: r.period,
+            hospital: r.hospital, department: r.department,
+            total: r.total, present: r.present, absent: r.absent,
+            withdrawn: r.withdrawn, leave: r.leave_count,
+            absentNames: r.absent_names, notes: r.notes,
+            status: r.status, rejectionReason: r.rejection_reason,
+            returnedForEdit: !!r.returned_for_edit, returnNote: r.return_note,
+          }));
+        } else if (error) {
+          console.warn('[بوابة الموظف] تعذر تحميل الجولات من قاعدة البيانات (هل نُفّذ ملف supabase-approvals-migration.sql؟):', error.message);
+        }
+      } catch (e) { console.warn('[بوابة الموظف] خطأ اتصال أثناء تحميل الجولات:', e); }
+    }
+    if (!rounds.length) {
+      // بديل محلي: جولات هذا المتصفح فقط
+      rounds = DB.getReports().filter(r =>
+        (r.employeeCode || '').toUpperCase() === this.currentEmployee.code.toUpperCase());
+    }
+    this._myRounds = rounds;
+
+    // تُعرض فقط الجولات التي تحتاج تعديل الموظف (مرفوضة أو مُعادة) وغير المعتمدة
+    const need = rounds.filter(r => r.status !== 'approved' && (r.status === 'rejected' || r.returnedForEdit));
+    if (!need.length) { panel.style.display = 'none'; return; }
+    panel.style.display = 'block';
+    document.getElementById('empMyRoundsCount').textContent = `(${need.length})`;
+    list.innerHTML = need.map(r => `
+      <div style="background:var(--surface,#fff);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between">
+        <div style="min-width:0">
+          <div style="font-weight:700;font-size:13.5px">
+            ${esc(r.date)} — ${esc(r.hospital) || '-'} / ${esc(r.department) || '-'}
+            <span class="badge badge-info" style="font-size:11px">${esc(r.period) || '-'}</span>
+            ${r.status === 'rejected'
+              ? '<span class="badge badge-danger" style="font-size:11px"><i class="fas fa-ban"></i> مرفوضة</span>'
+              : '<span class="badge badge-warning" style="font-size:11px"><i class="fas fa-rotate-right"></i> مُعادة للتعديل</span>'}
+          </div>
+          ${r.status === 'rejected' && r.rejectionReason ? `<div style="font-size:12.5px;color:var(--danger);margin-top:5px"><strong>سبب الرفض:</strong> ${esc(r.rejectionReason)}</div>` : ''}
+          ${r.returnedForEdit && r.returnNote ? `<div style="font-size:12.5px;color:var(--warning);margin-top:5px"><strong>ملاحظة مدير المناوبة:</strong> ${esc(r.returnNote)}</div>` : ''}
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="EmployeeApp.editRound('${esc(r.id)}')">
+          <i class="fas fa-pen-to-square"></i> تعديل وإعادة إرسال
+        </button>
+      </div>`).join('');
+  },
+
+  editRound(id) {
+    const r = this._myRounds.find(x => x.id === id);
+    if (!r) return;
+    this.editingId = id;
+    document.getElementById('empMainForm').style.display = '';
+    document.getElementById('empSuccessMsg').style.display = 'none';
+    document.getElementById('repDate').value = r.date || DB.today();
+    document.getElementById('repDay').value = r.day || DB.getDayName(r.date);
+    document.getElementById('repPeriod').value = r.period || '';
+    document.getElementById('repHospital').value = r.hospital || '';
+
+    // قسم واحد فقط في وضع تعديل تقرير قديم
+    const wrap = document.getElementById('roundSections');
+    if (wrap) wrap.innerHTML = '';
+    this.addSection({
+      department: r.department, total: r.total, present: r.present, absent: r.absent,
+      withdrawn: r.withdrawn, leave: r.leave, absentNames: r.absentNames, notes: r.notes,
+    });
+    this._setEditMode(true);
+
+    const notice = document.getElementById('empEditNotice');
+    if (notice) {
+      notice.style.display = 'block';
+      document.getElementById('empEditNoticeText').textContent =
+        `أنت تعدّل جولة ${r.date} (${r.hospital || ''} / ${r.department || ''}) — بعد الحفظ تعود تلقائياً إلى "بانتظار الاعتماد"`;
+    }
+    if (notice && typeof notice.scrollIntoView === 'function') notice.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  },
+
+  /* إظهار/إخفاء عناصر الواجهة حسب الوضع: جولة جديدة أم تعديل تقرير قديم */
+  _setEditMode(on) {
+    const show = (id, v) => { const el = document.getElementById(id); if (el) el.style.display = v; };
+    show('addSectionBtn', on ? 'none' : '');
+    show('saveEditBtn',   on ? '' : 'none');
+    show('approvalHint',  on ? 'none' : '');
+    show('saveRoundBtn',  on ? 'none' : '');
+    if (on) show('roundApprovalBlock', 'none');
+    // في وضع التعديل لا يُحذف القسم الوحيد
+    document.querySelectorAll('#roundSections .secRemoveBtn').forEach(b => { b.style.display = on ? 'none' : ''; });
+    if (!on) this.checkRoundComplete(); // إظهار قسم الاعتماد يقرره اكتمال الجولة
+  },
+
+  cancelEdit() {
+    this.editingId = null;
+    const notice = document.getElementById('empEditNotice');
+    if (notice) notice.style.display = 'none';
+    this.newReport();
+  },
+
+  /* تعبئة قوائم الأقسام في كل بطاقات الجولة حسب المستشفى المختار */
   loadDepts() {
-    const hospital = document.getElementById('repHospital').value;
-    const select = document.getElementById('repDept');
-    select.innerHTML = '<option value="">-- اختر القسم --</option>';
+    const hospital = document.getElementById('repHospital')?.value;
+    document.querySelectorAll('#roundSections .secDept').forEach(select => {
+      const prev = select.value;
+      select.innerHTML = '<option value="">-- اختر القسم --</option>';
+      if (hospital) {
+        DB.getDeptsByHospital(hospital).forEach(d => {
+          const opt = document.createElement('option');
+          opt.value = d.name; opt.textContent = d.name;
+          if (d.name === prev) opt.selected = true;
+          select.appendChild(opt);
+        });
+      }
+    });
+  },
+
+  /* تحقق أرقام قسم واحد داخل بطاقته */
+  recalcSection(inputEl) {
+    const card = inputEl.closest('.emp-section-card');
+    if (!card) return;
+    const num = cls => +card.querySelector('.' + cls)?.value || 0;
+    const total = num('secTotal');
+    const sum = num('secPresent') + num('secAbsent') + num('secWithdrawn') + num('secLeave');
+    const el = card.querySelector('.secValidation');
+    if (!el) return;
+    if (total === 0) { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    if (sum > total) {
+      el.style.background = 'var(--danger-bg)'; el.style.color = 'var(--danger)'; el.style.border = '1px solid var(--danger-border)';
+      el.innerHTML = `<i class="fas fa-exclamation-triangle"></i> مجموع الأرقام (${sum}) أكبر من إجمالي الموظفين (${total})`;
+    } else if (sum === total) {
+      el.style.background = 'var(--success-bg)'; el.style.color = 'var(--success)'; el.style.border = '1px solid var(--success-border)';
+      el.innerHTML = `<i class="fas fa-check-circle"></i> الأرقام صحيحة — المجموع: ${sum}`;
+    } else {
+      el.style.background = 'var(--warning-bg)'; el.style.color = 'var(--warning)'; el.style.border = '1px solid var(--warning-border)';
+      el.innerHTML = `<i class="fas fa-info-circle"></i> المجموع الحالي: ${sum} من ${total}`;
+    }
+  },
+
+  /* ====== أقسام الجولة (بطاقات ديناميكية) ====== */
+  addSection(prefill) {
+    const wrap = document.getElementById('roundSections');
+    if (!wrap) return;
+    const card = document.createElement('div');
+    card.className = 'emp-section-card';
+    card.style.cssText = 'border:1.5px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px;background:var(--surface,#fff)';
+    card.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="font-weight:700;font-size:14px;color:var(--secondary)">
+          <i class="fas fa-hospital-user"></i> <span class="secTitle">قسم</span>
+        </div>
+        <button class="btn btn-danger btn-sm btn-icon secRemoveBtn" title="حذف هذا القسم" onclick="EmployeeApp.removeSection(this)">
+          <i class="fas fa-trash"></i>
+        </button>
+      </div>
+      <div class="form-group">
+        <label>اسم القسم <span class="required">*</span></label>
+        <select class="form-control secDept"><option value="">-- اختر القسم --</option></select>
+      </div>
+      <div class="emp-numbers-row">
+        <div class="emp-number-card">
+          <label><i class="fas fa-users" style="color:var(--secondary)"></i> إجمالي الموظفين</label>
+          <input type="number" class="secTotal" min="0" value="0" oninput="EmployeeApp.recalcSection(this)">
+        </div>
+        <div class="emp-number-card">
+          <label><i class="fas fa-user-check" style="color:var(--success)"></i> الحضور</label>
+          <input type="number" class="secPresent" min="0" value="0" oninput="EmployeeApp.recalcSection(this)">
+        </div>
+        <div class="emp-number-card">
+          <label><i class="fas fa-user-times" style="color:var(--danger)"></i> الغياب</label>
+          <input type="number" class="secAbsent" min="0" value="0" oninput="EmployeeApp.recalcSection(this)">
+        </div>
+        <div class="emp-number-card">
+          <label><i class="fas fa-person-walking-arrow-right" style="color:var(--warning)"></i> المنسحبون</label>
+          <input type="number" class="secWithdrawn" min="0" value="0" oninput="EmployeeApp.recalcSection(this)">
+        </div>
+        <div class="emp-number-card">
+          <label><i class="fas fa-umbrella-beach" style="color:var(--pending)"></i> المجازون</label>
+          <input type="number" class="secLeave" min="0" value="0" oninput="EmployeeApp.recalcSection(this)">
+        </div>
+      </div>
+      <div class="secValidation" style="margin-top:12px;padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;display:none"></div>
+      <div class="form-group" style="margin-top:12px">
+        <label>أسماء المتغيبين</label>
+        <textarea class="form-control secAbsentNames" rows="2" placeholder="اكتب أسماء الغائبين، كل اسم في سطر..."></textarea>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>الملاحظات</label>
+        <textarea class="form-control secNotes" rows="2" placeholder="أي ملاحظات إضافية..."></textarea>
+      </div>`;
+    wrap.appendChild(card);
+
+    // تعبئة قائمة الأقسام حسب المستشفى الحالي
+    const hospital = document.getElementById('repHospital')?.value;
+    const select = card.querySelector('.secDept');
     if (hospital) {
       DB.getDeptsByHospital(hospital).forEach(d => {
         const opt = document.createElement('option');
@@ -1881,86 +2319,440 @@ const EmployeeApp = {
         select.appendChild(opt);
       });
     }
+
+    if (prefill) {
+      if (prefill.department) {
+        if (![...select.options].some(o => o.value === prefill.department)) {
+          const opt = document.createElement('option');
+          opt.value = prefill.department; opt.textContent = prefill.department;
+          select.appendChild(opt);
+        }
+        select.value = prefill.department;
+      }
+      card.querySelector('.secTotal').value       = prefill.total || 0;
+      card.querySelector('.secPresent').value     = prefill.present || 0;
+      card.querySelector('.secAbsent').value      = prefill.absent || 0;
+      card.querySelector('.secWithdrawn').value   = prefill.withdrawn || 0;
+      card.querySelector('.secLeave').value       = prefill.leave || 0;
+      card.querySelector('.secAbsentNames').value = prefill.absentNames || '';
+      card.querySelector('.secNotes').value       = prefill.notes || '';
+      this.recalcSection(card.querySelector('.secTotal'));
+    }
+    this._renumberSections();
+    this.checkRoundComplete();
   },
 
-  recalculate() {
-    const total     = +document.getElementById('repTotal').value     || 0;
-    const present   = +document.getElementById('repPresent').value   || 0;
-    const absent    = +document.getElementById('repAbsent').value    || 0;
-    const withdrawn = +document.getElementById('repWithdrawn').value || 0;
-    const leave     = +document.getElementById('repLeave').value     || 0;
-    const sum = present + absent + withdrawn + leave;
-    const el = document.getElementById('numValidation');
-    if (!el) return;
-    if (total === 0) { el.style.display = 'none'; return; }
-    if (sum > total) {
-      el.style.display = 'block';
-      el.style.background = 'var(--danger-bg)'; el.style.color = 'var(--danger)'; el.style.border = '1px solid var(--danger-border)';
-      el.innerHTML = `<i class="fas fa-exclamation-triangle"></i> مجموع الأرقام (${sum}) أكبر من إجمالي الموظفين (${total})`;
-    } else if (sum === total) {
-      el.style.display = 'block';
-      el.style.background = 'var(--success-bg)'; el.style.color = 'var(--success)'; el.style.border = '1px solid var(--success-border)';
-      el.innerHTML = `<i class="fas fa-check-circle"></i> الأرقام صحيحة — المجموع: ${sum}`;
-    } else {
-      el.style.display = 'block';
-      el.style.background = 'var(--warning-bg)'; el.style.color = 'var(--warning)'; el.style.border = '1px solid var(--warning-border)';
-      el.innerHTML = `<i class="fas fa-info-circle"></i> المجموع الحالي: ${sum} من ${total}`;
+  removeSection(btn) {
+    const cards = document.querySelectorAll('#roundSections .emp-section-card');
+    if (cards.length <= 1) return Toast.show('الجولة يجب أن تحتوي على قسم واحد على الأقل', 'warning');
+    btn.closest('.emp-section-card')?.remove();
+    this._renumberSections();
+    this.checkRoundComplete();
+  },
+
+  _renumberSections() {
+    const cards = document.querySelectorAll('#roundSections .emp-section-card');
+    cards.forEach((c, i) => { const t = c.querySelector('.secTitle'); if (t) t.textContent = `القسم ${i + 1}`; });
+    const cnt = document.getElementById('sectionsCount');
+    if (cnt) cnt.textContent = `(${cards.length} ${cards.length === 1 ? 'قسم' : 'أقسام'})`;
+  },
+
+  /* جمع أقسام الجولة مع التحقق — يعيد { ok, sections | msg } */
+  _collectSections() {
+    const cards = [...document.querySelectorAll('#roundSections .emp-section-card')];
+    if (!cards.length) return { ok: false, msg: 'أضف قسماً واحداً على الأقل للجولة' };
+    const sections = [];
+    const seen = new Set();
+    for (let i = 0; i < cards.length; i++) {
+      const c = cards[i];
+      const val = cls => c.querySelector('.' + cls)?.value;
+      const dept = (val('secDept') || '').trim();
+      if (!dept) return { ok: false, msg: `يرجى اختيار اسم القسم في القسم ${i + 1}` };
+      if (seen.has(dept)) return { ok: false, msg: `القسم "${dept}" مكرر داخل الجولة` };
+      seen.add(dept);
+      const total = +val('secTotal') || 0, present = +val('secPresent') || 0,
+            absent = +val('secAbsent') || 0, withdrawn = +val('secWithdrawn') || 0,
+            leave = +val('secLeave') || 0;
+      if (total < 0) return { ok: false, msg: `إجمالي الموظفين لا يمكن أن يكون سالباً (القسم ${i + 1})` };
+      const sum = present + absent + withdrawn + leave;
+      if (sum > total && total > 0) return { ok: false, msg: `مجموع الأرقام (${sum}) أكبر من الإجمالي (${total}) في قسم "${dept}"` };
+      sections.push({
+        department: dept, total, present, absent, withdrawn, leave,
+        absentNames: (val('secAbsentNames') || '').trim(),
+        notes: (val('secNotes') || '').trim(),
+      });
+    }
+    return { ok: true, sections };
+  },
+
+  /* ====== رسالة النجاح المشتركة ====== */
+  _showSuccess(title, desc) {
+    document.getElementById('empMainForm').style.display = 'none';
+    document.getElementById('empSuccessMsg').style.display = 'block';
+    const t = document.getElementById('empSuccessTitle');
+    const d = document.getElementById('empSuccessDesc');
+    if (t) t.textContent = title;
+    if (d) d.textContent = desc;
+    const notice = document.getElementById('empEditNotice');
+    if (notice) notice.style.display = 'none';
+  },
+
+  /* ====== لوحة توقيع المدير المناوب ====== */
+  _roundSig: { drawing: false, dirty: false },
+
+  _initRoundSigPad() {
+    const canvas = document.getElementById('roundSigCanvas');
+    if (!canvas || canvas._sigInit) return;
+    const ctx = canvas.getContext && canvas.getContext('2d');
+    if (!ctx) return; // بيئة بلا Canvas
+    canvas._sigInit = true;
+    ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const pos = e => {
+      const rect = canvas.getBoundingClientRect();
+      const p = e.touches ? e.touches[0] : e;
+      return { x: (p.clientX - rect.left) * (canvas.width / rect.width), y: (p.clientY - rect.top) * (canvas.height / rect.height) };
+    };
+    const start = e => {
+      e.preventDefault();
+      this._roundSig.drawing = true;
+      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#1a3a5c';
+      const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y);
+    };
+    const move = e => {
+      if (!this._roundSig.drawing) return;
+      e.preventDefault();
+      const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke();
+      this._roundSig.dirty = true;
+    };
+    const end = () => { this._roundSig.drawing = false; };
+    canvas.addEventListener('mousedown', start);
+    canvas.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', end);
+    canvas.addEventListener('touchstart', start, { passive: false });
+    canvas.addEventListener('touchmove', move, { passive: false });
+    canvas.addEventListener('touchend', end);
+  },
+
+  clearRoundSignature() {
+    const canvas = document.getElementById('roundSigCanvas');
+    const ctx = canvas && canvas.getContext && canvas.getContext('2d');
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    this._roundSig.dirty = false;
+  },
+
+  /* ====== التحقق من كود المدير المناوب (يعرض اسمه) ====== */
+  async verifyManager() {
+    const code = (document.getElementById('mgrApprovalCode')?.value || '').trim().toUpperCase();
+    const nameEl = document.getElementById('mgrApprovalName');
+    if (!code) return Toast.show('أدخل كود المدير المناوب أولاً', 'warning');
+    if (!Cloud.on()) return Toast.show('التحقق يتطلب الاتصال بقاعدة البيانات Supabase', 'error');
+    try {
+      const { data, error } = await Cloud.sb.rpc('verify_manager_code', { p_code: code });
+      if (error) throw error;
+      if (Array.isArray(data) && data.length) {
+        const name = data[0].name;
+        // اختيار الاسم المطابق في القائمة المنسدلة (ويُضاف إن لم يكن موجوداً)
+        if (nameEl) {
+          if (![...nameEl.options].some(o => o.value === name)) {
+            const opt = document.createElement('option');
+            opt.value = name; opt.textContent = name;
+            nameEl.appendChild(opt);
+          }
+          nameEl.value = name;
+        }
+        Toast.show('تم التحقق — المدير المناوب: ' + name, 'success');
+      } else {
+        if (nameEl) nameEl.value = '';
+        Toast.show('كود الاعتماد غير صحيح أو غير مسجل', 'error');
+      }
+    } catch (e) {
+      console.error('[بوابة الموظف] فشل التحقق من كود المدير المناوب:', e);
+      Toast.show('تعذر التحقق — تحقق من الاتصال', 'error');
     }
   },
 
-  submitReport() {
-    const date      = document.getElementById('repDate').value;
-    const day       = document.getElementById('repDay').value;
-    const period    = document.getElementById('repPeriod').value;
-    const hospital  = document.getElementById('repHospital').value;
-    const dept      = document.getElementById('repDept').value;
-    const total     = +document.getElementById('repTotal').value     || 0;
-    const present   = +document.getElementById('repPresent').value   || 0;
-    const absent    = +document.getElementById('repAbsent').value    || 0;
-    const withdrawn = +document.getElementById('repWithdrawn').value || 0;
-    const leave     = +document.getElementById('repLeave').value     || 0;
-    const absentNames = document.getElementById('repAbsentNames').value.trim();
-    const notes     = document.getElementById('repNotes').value.trim();
-    const enteredBy = document.getElementById('repEnteredBy').value;
+  /* ====== الحفظ النهائي: اعتماد الجولة كاملة بجميع أقسامها ======
+     لا حفظ إلا بعد اعتماد المدير المناوب (كود + توقيع) — اعتماد واحد
+     على مستوى الجولة وليس لكل قسم. كل الحفظ في Supabase مباشرة. */
+  /* ====== الخطوة 1: اعتماد المدير المناوب — إلزامي قبل الحفظ النهائي ======
+     لا يحفظ شيئاً بعد: يتحقق من الكود والتوقيع، يقفل جميع الأقسام،
+     يلوّن قسم الاعتماد بالأخضر مع ✓ ويفعّل زر "حفظ الجولة". */
+  _roundApproval: null, // { mgrCode, mgrName, signature, count }
 
-    // تحقق
-    if (!date)    return Toast.show('يرجى اختيار التاريخ', 'error');
-    if (!period)  return Toast.show('يرجى اختيار الفترة', 'error');
+  async approveRound() {
+    if (this.editingId) return this.saveEditedReport();
+    if (this._roundApproval) return; // معتمدة مسبقاً
+
+    const date     = document.getElementById('repDate').value;
+    const period   = document.getElementById('repPeriod').value;
+    const hospital = document.getElementById('repHospital').value;
+    if (!date)     return Toast.show('يرجى اختيار التاريخ', 'error');
+    if (!period)   return Toast.show('يرجى اختيار الفترة', 'error');
     if (!hospital) return Toast.show('يرجى اختيار المستشفى', 'error');
-    if (!dept)    return Toast.show('يرجى اختيار القسم', 'error');
-    if (total < 0) return Toast.show('إجمالي الموظفين لا يمكن أن يكون سالباً', 'error');
 
-    const sum = present + absent + withdrawn + leave;
-    if (sum > total && total > 0) return Toast.show(`مجموع الأرقام (${sum}) أكبر من إجمالي الموظفين (${total})`, 'error');
+    const col = this._collectSections();
+    if (!col.ok) return Toast.show(col.msg, 'error', 6000);
 
-    // منع التقارير المكررة لنفس (التاريخ/المستشفى/القسم/الفترة) — المرفوضة تُستثنى للسماح بإعادة الإدخال
-    const duplicate = DB.getReports().some(r =>
-      r.date === date && r.hospital === hospital && r.department === dept &&
-      r.period === period && r.status !== 'rejected'
-    );
-    if (duplicate) return Toast.show('يوجد تقرير مسجل مسبقاً لهذا القسم في نفس التاريخ والفترة. راجع النائب الإداري إن كان هناك خطأ.', 'error', 6000);
+    // بوابة الاعتماد: اسم + كود + توقيع المدير المناوب
+    const gate = document.getElementById('approvalGateMsg');
+    const mgrSelect = document.getElementById('mgrApprovalName');
+    const selectedName = mgrSelect?.value || '';
+    const mgrCode = (document.getElementById('mgrApprovalCode')?.value || '').trim().toUpperCase();
+    const nameRequired = mgrSelect && mgrSelect.options.length > 1; // القائمة محمّلة من قاعدة البيانات
+    if (!mgrCode || !this._roundSig.dirty || (nameRequired && !selectedName)) {
+      if (gate) gate.style.display = 'block';
+      return Toast.show('يجب اعتماد الجولة كاملة من المدير المناوب قبل الحفظ.', 'error', 6000);
+    }
+    if (gate) gate.style.display = 'none';
 
-    const report = DB.addReport({ date, day, period, hospital, department: dept, total, present, absent, withdrawn, leave, absentNames, notes, enteredBy, employeeCode: this.currentEmployee.code });
-    // الإرسال للسحابة عبر RPC (يتحقق الخادم من الكود ويمنع التكرار) — يُعاد تلقائياً عند انقطاع الاتصال
-    Sync.queueSubmit(report, this.currentEmployee.code);
+    if (!Cloud.on()) return Toast.show('الاعتماد يتطلب الاتصال بقاعدة البيانات Supabase — راجع config.js', 'error', 7000);
 
-    // إخفاء النموذج وعرض رسالة النجاح
-    document.getElementById('empMainForm').style.display = 'none';
-    document.getElementById('empSuccessMsg').style.display = 'block';
-    document.getElementById('numValidation').style.display = 'none';
+    const btn = document.getElementById('approveRoundBtn');
+    if (btn) btn.disabled = true;
+    try {
+      // التحقق من كود المدير المناوب ومطابقته للاسم المختار
+      const { data: vData, error: vErr } = await Cloud.sb.rpc('verify_manager_code', { p_code: mgrCode });
+      if (vErr) throw vErr;
+      const verifiedName = (Array.isArray(vData) && vData.length) ? vData[0].name : null;
+      if (!verifiedName) {
+        if (gate) gate.style.display = 'block';
+        if (btn) btn.disabled = false;
+        return Toast.show('كود المدير المناوب غير صحيح — لا يمكن اعتماد الجولة', 'error', 6000);
+      }
+      if (selectedName && verifiedName !== selectedName) {
+        if (btn) btn.disabled = false;
+        return Toast.show(`الكود المدخل يعود إلى "${verifiedName}" ولا يطابق المدير المناوب المختار "${selectedName}"`, 'error', 7000);
+      }
+
+      // اعتماد واحد للجولة كاملة (وليس لكل قسم) — يُحفظ مع الجولة عند الحفظ النهائي
+      this._roundApproval = {
+        mgrCode,
+        mgrName: verifiedName,
+        signature: document.getElementById('roundSigCanvas').toDataURL('image/png'),
+        count: col.sections.length,
+      };
+      this._applyApprovedState(true);
+      Toast.show('تم اعتماد الجولة بواسطة المدير المناوب — يمكن الآن حفظ الجولة', 'success', 6000);
+    } catch (e) {
+      if (btn) btn.disabled = false;
+      console.error('[بوابة الموظف] فشل اعتماد الجولة:', e);
+      Toast.show('تعذر الاتصال بقاعدة البيانات — لم يتم الاعتماد، حاول مجدداً', 'error', 7000);
+    }
   },
 
+  /* تطبيق/إزالة حالة "معتمدة قبل الحفظ": قفل الأقسام + قسم أخضر + ✓ + تفعيل زر الحفظ */
+  _applyApprovedState(on) {
+    // قفل بيانات الجولة وجميع الأقسام — لا تعديل بعد الاعتماد إلا بإلغاء الاعتماد
+    ['repDate','repPeriod','repHospital'].forEach(id => { const el = document.getElementById(id); if (el) el.disabled = on; });
+    document.querySelectorAll('#roundSections input, #roundSections select, #roundSections textarea, #roundSections button')
+      .forEach(el => { el.disabled = on; });
+    const addBtn = document.getElementById('addSectionBtn');
+    if (addBtn) addBtn.disabled = on;
+
+    // كتلة الاعتماد: تعطيل مدخلاتها وتلوينها بالأخضر
+    ['mgrApprovalName','mgrApprovalCode'].forEach(id => { const el = document.getElementById(id); if (el) el.disabled = on; });
+    const block = document.getElementById('roundApprovalBlock');
+    if (block) {
+      block.querySelectorAll('button').forEach(b => { if (b.id !== 'cancelApprovalBtn') b.disabled = on; });
+      block.style.background  = on ? 'var(--success-bg)' : 'var(--surface-2)';
+      block.style.borderColor = on ? 'var(--success)' : 'var(--border)';
+    }
+    const canvas = document.getElementById('roundSigCanvas');
+    if (canvas) canvas.style.pointerEvents = on ? 'none' : '';
+    const approveBtn = document.getElementById('approveRoundBtn');
+    if (approveBtn) { approveBtn.disabled = on; approveBtn.style.display = on ? 'none' : ''; }
+
+    // ✓ تم اعتماد الجولة + الرسالة أعلى الصفحة + تفعيل زر الحفظ
+    const mark = document.getElementById('approvalDoneMark');
+    if (mark) mark.style.display = on ? 'block' : 'none';
+    const by = document.getElementById('approvalDoneBy');
+    if (by) by.textContent = (on && this._roundApproval)
+      ? `المدير المناوب: ${this._roundApproval.mgrName} — الاعتماد للجولة كاملة (${this._roundApproval.count} قسم)` : '';
+    const cancelBtn = document.getElementById('cancelApprovalBtn');
+    if (cancelBtn) cancelBtn.disabled = false;
+    const topMsg = document.getElementById('approvedTopMsg');
+    if (topMsg) topMsg.style.display = on ? 'block' : 'none';
+    const saveBtn = document.getElementById('saveRoundBtn');
+    if (saveBtn) saveBtn.disabled = !on;
+    const gate = document.getElementById('approvalGateMsg');
+    if (gate) gate.style.display = 'none';
+    if (on && topMsg && typeof topMsg.scrollIntoView === 'function') topMsg.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (!on) this.checkRoundComplete();
+  },
+
+  /* إلغاء الاعتماد (قبل الحفظ النهائي فقط) — يفتح الأقسام للتعديل مجدداً */
+  cancelApproval() {
+    if (!this._roundApproval) return;
+    this._roundApproval = null;
+    this._applyApprovedState(false);
+    Toast.show('تم إلغاء الاعتماد — يمكن تعديل الأقسام ثم إعادة الاعتماد', 'warning', 5000);
+  },
+
+  /* ====== الخطوة 2: الحفظ النهائي — لا يعمل إطلاقاً بدون اعتماد المدير المناوب ====== */
+  async saveRound() {
+    if (this.editingId) return this.saveEditedReport();
+    const gate = document.getElementById('approvalGateMsg');
+    if (!this._roundApproval) {
+      if (gate) gate.style.display = 'block';
+      return Toast.show('يجب اعتماد الجولة كاملة من المدير المناوب قبل الحفظ.', 'error', 6000);
+    }
+    if (!Cloud.on()) return Toast.show('حفظ الجولة يتطلب الاتصال بقاعدة البيانات Supabase — راجع config.js', 'error', 7000);
+
+    const date     = document.getElementById('repDate').value;
+    const day      = document.getElementById('repDay').value;
+    const period   = document.getElementById('repPeriod').value;
+    const hospital = document.getElementById('repHospital').value;
+    const col = this._collectSections();
+    if (!col.ok) return Toast.show(col.msg, 'error', 6000);
+
+    const btn = document.getElementById('saveRoundBtn');
+    if (btn) btn.disabled = true;
+    try {
+      const payload = {
+        client_id: DB._uid(), date, day, period, hospital,
+        signature: this._roundApproval.signature, sections: col.sections,
+      };
+      const { data, error } = await Cloud.sb.rpc('submit_approved_round', {
+        p_emp_code: this.currentEmployee.code, p_mgr_code: this._roundApproval.mgrCode, p: payload,
+      });
+      if (error) throw error;
+      if (data !== 'ok') {
+        if (btn) btn.disabled = false;
+        if (String(data).startsWith('duplicate_section:')) {
+          return Toast.show(`قسم "${String(data).split(':')[1]}" له تقرير مسجل مسبقاً بنفس التاريخ والفترة`, 'error', 7000);
+        }
+        const msgs = {
+          invalid_employee_code: 'كودك لم يعد صالحاً — سجّل الدخول مجدداً',
+          invalid_manager_code:  'كود الاعتماد لم يعد صالحاً — ألغِ الاعتماد وأعد المحاولة',
+          signature_required:    'التوقيع الإلكتروني للمدير المناوب إلزامي',
+          no_sections:           'أضف قسماً واحداً على الأقل للجولة',
+          duplicate_round:       'توجد جولة معتمدة مسجلة مسبقاً لنفس التاريخ والمستشفى والفترة',
+          bad_payload:           'بيانات الجولة غير مكتملة — تحقق من الحقول',
+        };
+        return Toast.show(msgs[data] || ('تعذر الحفظ: ' + data), 'error', 7000);
+      }
+      const mgrName = this._roundApproval.mgrName;
+      Toast.show('تم حفظ الجولة كاملة بجميع أقسامها في قاعدة البيانات', 'success', 6000);
+      // قفل نهائي داخل الصفحة نفسها — دون الانتقال لأي شاشة أخرى
+      this._lockRound(mgrName, col.sections.length);
+      this.loadMyRounds();
+    } catch (e) {
+      if (btn) btn.disabled = false;
+      console.error('[بوابة الموظف] فشل حفظ الجولة:', e);
+      Toast.show('تعذر الاتصال بقاعدة البيانات — لم تُحفظ الجولة، حاول مجدداً', 'error', 7000);
+    }
+  },
+
+  /* توافق خلفي مع الاسم السابق */
+  approveAndSaveRound() { return this.approveRound(); },
+
+  /* ====== قفل الجولة بعد الاعتماد: كل البيانات للقراءة فقط داخل الصفحة نفسها ====== */
+  _lockRound(managerName, sectionsCount) {
+    this._roundLocked = true;
+    const form = document.getElementById('empMainForm');
+    if (form) form.querySelectorAll('input, select, textarea, button').forEach(el => { el.disabled = true; });
+    ['roundApprovalBlock', 'approvalHint', 'addSectionBtn', 'approvalGateMsg', 'approvedTopMsg', 'saveRoundBtn'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.style.display = 'none';
+    });
+    const banner = document.getElementById('roundApprovedBanner');
+    if (banner) {
+      banner.style.display = 'block';
+      banner.querySelectorAll('button').forEach(b => { b.disabled = false; });
+      const info = document.getElementById('roundApprovedInfo');
+      if (info) info.textContent =
+        `المدير المناوب: ${managerName} — عدد الأقسام المعتمدة: ${sectionsCount} — الحالة: معتمدة (approved)`;
+    }
+    if (banner && typeof banner.scrollIntoView === 'function') banner.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  },
+
+  /* ====== حفظ تعديل تقرير قديم (مرفوض/مُعاد) — يعود إلى بانتظار الاعتماد ====== */
+  async saveEditedReport() {
+    if (!this.editingId) return;
+    const date     = document.getElementById('repDate').value;
+    const day      = document.getElementById('repDay').value;
+    const period   = document.getElementById('repPeriod').value;
+    const hospital = document.getElementById('repHospital').value;
+    if (!date)     return Toast.show('يرجى اختيار التاريخ', 'error');
+    if (!period)   return Toast.show('يرجى اختيار الفترة', 'error');
+    if (!hospital) return Toast.show('يرجى اختيار المستشفى', 'error');
+
+    const col = this._collectSections();
+    if (!col.ok) return Toast.show(col.msg, 'error', 6000);
+    const s = col.sections[0];
+
+    const editId = this.editingId;
+    const payload = { date, day, period, hospital, department: s.department,
+      total: s.total, present: s.present, absent: s.absent, withdrawn: s.withdrawn,
+      leave: s.leave, absentNames: s.absentNames, notes: s.notes };
+
+    if (Cloud.on() && navigator.onLine !== false) {
+      try {
+        const { data, error } = await Cloud.sb.rpc('update_my_report', {
+          p_code: this.currentEmployee.code, p_client_id: editId, p: payload,
+        });
+        if (error) throw error;
+        if (data === 'duplicate') return Toast.show('يوجد جولة أخرى مسجلة لهذا القسم في نفس التاريخ والفترة', 'error', 6000);
+        if (data !== 'ok') {
+          const msgs = { invalid_code: 'كودك لم يعد صالحاً — سجّل الدخول مجدداً', not_found: 'الجولة غير موجودة في قاعدة البيانات', not_owner: 'لا تملك صلاحية تعديل هذه الجولة', already_approved: 'الجولة اعتُمدت — لا يمكن تعديلها إلا من المدير العام' };
+          return Toast.show(msgs[data] || ('تعذر الحفظ: ' + data), 'error', 6000);
+        }
+      } catch (e) {
+        console.error('[بوابة الموظف] فشل حفظ التعديل في قاعدة البيانات:', e);
+        return Toast.show('تعذر حفظ التعديل في قاعدة البيانات — تحقق من الاتصال وحاول مجدداً', 'error', 6000);
+      }
+    }
+
+    // تحديث النسخة المحلية إن وُجدت (توافق قديم — ليست مصدر الحقيقة)
+    const local = DB.getReports();
+    const i = local.findIndex(r => r.id === editId);
+    if (i >= 0) {
+      local[i] = { ...local[i], ...payload, status: 'pending',
+        rejectionReason: undefined, rejectedAt: undefined, returnedForEdit: false, returnNote: undefined };
+      DB._saveReports(local);
+    }
+
+    this.editingId = null;
+    this._setEditMode(false);
+    Toast.show('تم حفظ التعديل وإعادة الجولة للاعتماد', 'success');
+    this._showSuccess('تم حفظ التعديل بنجاح!', 'عادت الجولة تلقائياً إلى "بانتظار الاعتماد"');
+    this.loadMyRounds();
+  },
+
+  /* ====== جولة جديدة: إعادة ضبط النموذج كاملاً وفك القفل ====== */
   newReport() {
+    this.editingId = null;
+    this._roundLocked = false;
+    this._roundApproval = null;
+    const notice = document.getElementById('empEditNotice');
+    if (notice) notice.style.display = 'none';
+    // فك قفل جميع الحقول والأزرار وإخفاء شعار الاعتماد
+    const form = document.getElementById('empMainForm');
+    if (form) form.querySelectorAll('input, select, textarea, button').forEach(el => { el.disabled = false; });
+    const banner = document.getElementById('roundApprovedBanner');
+    if (banner) banner.style.display = 'none';
+    const saveBtn = document.getElementById('saveRoundBtn');
+    if (saveBtn) saveBtn.style.display = '';
+    this.loadMyRounds();
     document.getElementById('empMainForm').style.display = '';
     document.getElementById('empSuccessMsg').style.display = 'none';
-    // إعادة ضبط الحقول
-    ['repPeriod','repHospital','repDept'].forEach(id => { document.getElementById(id).value = ''; });
-    ['repTotal','repPresent','repAbsent','repWithdrawn','repLeave'].forEach(id => { document.getElementById(id).value = 0; });
-    document.getElementById('repAbsentNames').value = '';
-    document.getElementById('repNotes').value = '';
+    // رأس الجولة
+    ['repPeriod','repHospital'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     document.getElementById('repDate').value = DB.today();
     document.getElementById('repDay').value = DB.getDayName(DB.today());
-    document.getElementById('numValidation').style.display = 'none';
+    // الأقسام: بطاقة واحدة فارغة
+    const wrap = document.getElementById('roundSections');
+    if (wrap) { wrap.innerHTML = ''; this.addSection(); }
+    // كتلة الاعتماد
+    const mgrCode = document.getElementById('mgrApprovalCode');
+    const mgrName = document.getElementById('mgrApprovalName');
+    if (mgrCode) mgrCode.value = '';
+    if (mgrName) mgrName.value = '';
+    this.clearRoundSignature();
+    const gate = document.getElementById('approvalGateMsg');
+    if (gate) gate.style.display = 'none';
+    // إعادة حالة الاعتماد لوضعها الأصلي (زر الحفظ معطل حتى اعتماد جديد)
+    this._applyApprovedState(false);
+    this._setEditMode(false);
   },
 };
 
@@ -2260,16 +3052,16 @@ Object.assign(AdminApp, {
 
     if (type === 'daily') {
       const date = document.getElementById('dailyDate')?.value;
-      reports = reports.filter(r => r.date === date);
+      reports = this._applyStatusFilter(reports.filter(r => r.date === date), 'dailyStatus');
       periodLabel = `التقرير اليومي — ${date} (${DB.getDayName(date)})`;
     } else if (type === 'weekly') {
       const from = document.getElementById('weeklyFrom')?.value;
       const to   = document.getElementById('weeklyTo')?.value;
-      reports = reports.filter(r => (!from || r.date >= from) && (!to || r.date <= to));
+      reports = this._applyStatusFilter(reports.filter(r => (!from || r.date >= from) && (!to || r.date <= to)), 'weeklyStatus');
       periodLabel = `التقرير الأسبوعي — من ${from} إلى ${to}`;
     } else if (type === 'monthly') {
       const month = document.getElementById('monthlyMonth')?.value;
-      reports = reports.filter(r => month && r.date.startsWith(month));
+      reports = this._applyStatusFilter(reports.filter(r => month && r.date.startsWith(month)), 'monthlyStatus');
       periodLabel = `التقرير الشهري — ${month}`;
     }
 
