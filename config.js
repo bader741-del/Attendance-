@@ -10,7 +10,7 @@ const SUPABASE_CONFIG = {
   anonKey: 'sb_publishable_yOfjjPkItn9jIl8tyUOVPg_An9XsFUI',
   /* بريد مستخدم المسؤول في Supabase Auth — يُستخدم داخلياً خلف
      شاشة الدخول الحالية (التي تطلب كلمة المرور فقط) */
-  adminEmail: 'admin@mksh.local',
+  adminEmail: 'bader741@gmail.com',
 };
 
 /* حارس التفعيل: صحيح فقط عند وضع قيم حقيقية */
