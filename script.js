@@ -2088,13 +2088,17 @@ const EmployeeApp = {
   /* ====== إظهار قسم "اعتماد الجولة" فقط بعد اكتمال إدخال جميع الأقسام ====== */
   _roundLocked: false,
 
-  isRoundComplete() {
-    const date     = document.getElementById('repDate')?.value;
-    const period   = document.getElementById('repPeriod')?.value;
-    const hospital = document.getElementById('repHospital')?.value;
-    if (!date || !period || !hospital) return false;
-    return this._collectSections().ok;
+  /* يعيد null إن كانت الجولة مكتملة، أو نص السبب الأول المتبقي لاكتمالها.
+     الاكتمال يعتمد على الأقسام المضافة فعلياً في الصفحة — لا عدد ثابت. */
+  _roundMissing() {
+    if (!document.getElementById('repDate')?.value)     return 'اختيار التاريخ';
+    if (!document.getElementById('repPeriod')?.value)   return 'اختيار الفترة';
+    if (!document.getElementById('repHospital')?.value) return 'اختيار المستشفى';
+    const col = this._collectSections();
+    return col.ok ? null : col.msg;
   },
+
+  isRoundComplete() { return this._roundMissing() === null; },
 
   checkRoundComplete() {
     const block = document.getElementById('roundApprovalBlock');
@@ -2106,9 +2110,17 @@ const EmployeeApp = {
       return;
     }
     if (this._roundApproval) return; // معتمدة قبل الحفظ — يبقى القسم ظاهراً بحالته الخضراء
-    const complete = this.isRoundComplete();
+    const missing = this._roundMissing();
+    const complete = missing === null;
     block.style.display = complete ? '' : 'none';
-    if (hint) hint.style.display = complete ? 'none' : '';
+    if (hint) {
+      hint.style.display = complete ? 'none' : '';
+      // إظهار السبب الفعلي المتبقي بدل النص العام — حتى يعرف الموظف لماذا لم يظهر الاعتماد
+      const span = hint.querySelector('span');
+      if (span && missing) {
+        span.innerHTML = `المتبقي لاكتمال الجولة: <strong>${esc(missing)}</strong> — بعد الاكتمال يظهر هنا قسم <strong>اعتماد الجولة</strong> للمدير المناوب مباشرة.`;
+      }
+    }
   },
 
   /* ====== جولاتي المرفوضة / المُعادة للتعديل ====== */
@@ -2231,6 +2243,7 @@ const EmployeeApp = {
         });
       }
     });
+    this.checkRoundComplete(); // إعادة تعبئة الأقسام قد تغيّر اكتمال الجولة
   },
 
   /* تحقق أرقام قسم واحد داخل بطاقته */
@@ -2466,9 +2479,19 @@ const EmployeeApp = {
         Toast.show('كود الاعتماد غير صحيح أو غير مسجل', 'error');
       }
     } catch (e) {
-      console.error('[بوابة الموظف] فشل التحقق من كود المدير المناوب:', e);
-      Toast.show('تعذر التحقق — تحقق من الاتصال', 'error');
+      console.error('[بوابة الموظف] فشل التحقق من كود المدير المناوب — خطأ Supabase:', e);
+      Toast.show('فشل التحقق: ' + this._sbErr(e), 'error', 8000);
     }
+  },
+
+  /* صياغة سبب الفشل الحقيقي القادم من Supabase (message/details/hint/code) */
+  _sbErr(e) {
+    if (!e) return 'خطأ غير معروف';
+    if (typeof e === 'string') return e;
+    const parts = [e.message, e.details, e.hint].filter(Boolean);
+    if (e.code) parts.push(`(رمز الخطأ: ${e.code})`);
+    if (!parts.length) { try { return JSON.stringify(e); } catch { return String(e); } }
+    return parts.join(' — ');
   },
 
   /* ====== الحفظ النهائي: اعتماد الجولة كاملة بجميع أقسامها ======
@@ -2535,8 +2558,8 @@ const EmployeeApp = {
       Toast.show('تم اعتماد الجولة بواسطة المدير المناوب — يمكن الآن حفظ الجولة', 'success', 6000);
     } catch (e) {
       if (btn) btn.disabled = false;
-      console.error('[بوابة الموظف] فشل اعتماد الجولة:', e);
-      Toast.show('تعذر الاتصال بقاعدة البيانات — لم يتم الاعتماد، حاول مجدداً', 'error', 7000);
+      console.error('[بوابة الموظف] فشل اعتماد الجولة — خطأ Supabase:', e);
+      Toast.show('فشل اعتماد الجولة: ' + this._sbErr(e), 'error', 9000);
     }
   },
 
@@ -2638,8 +2661,8 @@ const EmployeeApp = {
       this.loadMyRounds();
     } catch (e) {
       if (btn) btn.disabled = false;
-      console.error('[بوابة الموظف] فشل حفظ الجولة:', e);
-      Toast.show('تعذر الاتصال بقاعدة البيانات — لم تُحفظ الجولة، حاول مجدداً', 'error', 7000);
+      console.error('[بوابة الموظف] فشل حفظ الجولة — خطأ Supabase:', e);
+      Toast.show('فشل حفظ الجولة: ' + this._sbErr(e), 'error', 9000);
     }
   },
 
